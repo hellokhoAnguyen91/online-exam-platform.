@@ -28,6 +28,7 @@ import html
 import io
 import re
 from typing import List, Dict, Any, Optional, Set, Tuple
+import xml.etree.ElementTree as ET
 import docx
 from docx.oxml.ns import nsmap
 
@@ -704,6 +705,68 @@ def parse_docx_questions(doc_file) -> List[Dict[str, Any]]:
             tbl = docx.table.Table(child, doc)
             body_items.append(('tbl', tbl))
             
+    # Parse Word numbering definitions if available (handles native Word bullet/numbered lists)
+    num_to_abstract = {}
+    abstract_lvls = {}
+    num_part = getattr(doc.part, 'numbering_part', None)
+    if num_part is not None:
+        try:
+            n_root = ET.fromstring(num_part._element.xml)
+            W_NS = '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}'
+            for num in n_root.findall(f'{W_NS}num'):
+                nid = num.attrib.get(f'{W_NS}numId')
+                aref_el = num.find(f'{W_NS}abstractNumId')
+                if nid and aref_el is not None:
+                    num_to_abstract[nid] = aref_el.attrib.get(f'{W_NS}val')
+            
+            for abs_num in n_root.findall(f'{W_NS}abstractNum'):
+                aid = abs_num.attrib.get(f'{W_NS}abstractNumId')
+                if aid:
+                    abstract_lvls[aid] = {}
+                    for lvl in abs_num.findall(f'{W_NS}lvl'):
+                        ilvl = lvl.attrib.get(f'{W_NS}ilvl', '0')
+                        fmt_el = lvl.find(f'{W_NS}numFmt')
+                        txt_el = lvl.find(f'{W_NS}lvlText')
+                        fmt_val = fmt_el.attrib.get(f'{W_NS}val', 'decimal') if fmt_el is not None else 'decimal'
+                        txt_val = txt_el.attrib.get(f'{W_NS}val', '%1.') if txt_el is not None else '%1.'
+                        abstract_lvls[aid][ilvl] = (fmt_val, txt_val)
+        except Exception:
+            pass
+
+    num_counters = {}
+    def get_para_num_prefix(p) -> str:
+        numPr = p._p.xpath('.//w:pPr/w:numPr')
+        if not numPr:
+            return ''
+        ilvl_el = numPr[0].xpath('./w:ilvl')
+        numId_el = numPr[0].xpath('./w:numId')
+        if not numId_el:
+            return ''
+        W_VAL = '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val'
+        nid = numId_el[0].attrib.get(W_VAL)
+        ilvl = ilvl_el[0].attrib.get(W_VAL, '0') if ilvl_el else '0'
+        aid = num_to_abstract.get(nid)
+        if not aid or aid not in abstract_lvls:
+            return ''
+        fmt, lvl_txt = abstract_lvls[aid].get(ilvl, ('decimal', '%1.'))
+        key = (nid, ilvl)
+        cnt = num_counters.get(key, 0) + 1
+        num_counters[key] = cnt
+        
+        if fmt == 'lowerLetter':
+            val = chr(ord('a') + (cnt - 1) % 26)
+        elif fmt == 'upperLetter':
+            val = chr(ord('A') + (cnt - 1) % 26)
+        elif fmt == 'bullet':
+            return '+ '
+        elif fmt == 'decimal':
+            val = str(cnt)
+        else:
+            val = str(cnt)
+        
+        prefix = lvl_txt.replace(f'%{int(ilvl)+1}', val).replace('%1', val)
+        return prefix.strip()
+
     questions: List[Dict[str, Any]] = []
     curr_q: Optional[Dict[str, Any]] = None
     last_opt_key: Optional[str] = None
@@ -850,6 +913,11 @@ def parse_docx_questions(doc_file) -> List[Dict[str, Any]]:
             clean_text = para.text.strip()
             has_media = para_has_media(para)
             
+            # Resolve Word automatic numbering prefix if text doesn't already have an explicit marker
+            num_prefix = get_para_num_prefix(para)
+            if num_prefix and not QUESTION_REGEX.match(clean_text) and not OPTION_LINE_REGEX.match(clean_text) and not PLUS_OPTION_REGEX.match(clean_text):
+                clean_text = f"{num_prefix} {clean_text}".strip()
+
             # If completely empty of both text and media, skip
             if not clean_text and not has_media:
                 continue
@@ -913,7 +981,14 @@ def parse_docx_questions(doc_file) -> List[Dict[str, Any]]:
                 
             # 2. Check for Multiple Options on single line (e.g. A. ... B. ... C. ... D. ...)
             multi_matches = list(MULTI_OPTION_REGEX.finditer(clean_text))
-            if len(multi_matches) >= 2 and curr_q:
+            opt_chars = [m.group(1).upper() for m in multi_matches]
+            opt_vals = [m.group(2).strip() for m in multi_matches]
+            is_valid_multi = (
+                len(multi_matches) >= 2 and
+                all(len(v) > 0 for v in opt_vals) and
+                all(ord(opt_chars[i]) < ord(opt_chars[i+1]) for i in range(len(opt_chars) - 1))
+            )
+            if is_valid_multi and curr_q:
                 opt_spans = []
                 for m in multi_matches:
                     opt_char_upper = m.group(1).upper()
@@ -1042,8 +1117,8 @@ def parse_docx_questions(doc_file) -> List[Dict[str, Any]]:
             tbl_bolded = set()
             tbl_asterisk = set()
             
-            for row in tbl.rows:
-                for cell in row.cells:
+            for r_idx, row in enumerate(tbl.rows):
+                for c_idx, cell in enumerate(row.cells):
                     c_text = cell.text.strip()
                     m_cell_opt = OPTION_LINE_REGEX.match(c_text)
                     if m_cell_opt:
@@ -1062,8 +1137,31 @@ def parse_docx_questions(doc_file) -> List[Dict[str, Any]]:
                                 
                         cell_seen: Set[str] = set()
                         c_imgs = extract_images_from_element(cell._tc, doc, cell_seen)
+                        if not c_imgs:
+                            # 1. Check cell in row above (same column)
+                            if r_idx > 0 and c_idx < len(tbl.rows[r_idx - 1].cells):
+                                above_cell = tbl.rows[r_idx - 1].cells[c_idx]
+                                if not OPTION_LINE_REGEX.match(above_cell.text.strip()):
+                                    c_imgs = extract_images_from_element(above_cell._tc, doc, cell_seen)
+                            # 2. Check cell in row below (same column)
+                            if not c_imgs and r_idx + 1 < len(tbl.rows) and c_idx < len(tbl.rows[r_idx + 1].cells):
+                                below_cell = tbl.rows[r_idx + 1].cells[c_idx]
+                                if not OPTION_LINE_REGEX.match(below_cell.text.strip()):
+                                    c_imgs = extract_images_from_element(below_cell._tc, doc, cell_seen)
+                            # 3. Check cell to the left (same row)
+                            if not c_imgs and c_idx > 0:
+                                left_cell = row.cells[c_idx - 1]
+                                if not OPTION_LINE_REGEX.match(left_cell.text.strip()):
+                                    c_imgs = extract_images_from_element(left_cell._tc, doc, cell_seen)
+                            # 4. Check cell to the right (same row)
+                            if not c_imgs and c_idx + 1 < len(row.cells):
+                                right_cell = row.cells[c_idx + 1]
+                                if not OPTION_LINE_REGEX.match(right_cell.text.strip()):
+                                    c_imgs = extract_images_from_element(right_cell._tc, doc, cell_seen)
+
                         if c_imgs:
-                            c_val += "<br>" + format_img_tags(c_imgs)
+                            img_html = format_img_tags(c_imgs)
+                            c_val = (c_val + "<br>" + img_html).strip("<br>") if c_val else img_html
                         extracted_opts[c_char] = c_val
                         
             if curr_q is not None:
