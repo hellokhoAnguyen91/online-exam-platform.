@@ -1526,19 +1526,23 @@ def get_result_detail(result_id: int, db: Session = Depends(get_db), current_use
     }
 
 @app.get("/api/admin/results/export")
-def export_results_excel(exam_id: Optional[int] = None, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def export_results_excel(exam_id: Optional[str] = None, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Export complete Excel package (.ZIP) containing class summary sheet and all candidate audit sheets."""
     if not current_user.is_admin:
         raise HTTPException(status_code=403, detail="Không có quyền truy cập")
         
-    target_exam_id = exam_id
+    target_exam_id = None
+    if exam_id is not None and str(exam_id).strip() and str(exam_id).strip().isdigit():
+        target_exam_id = int(str(exam_id).strip())
+        
     if not target_exam_id:
         active_exam = db.query(Exam).filter(Exam.is_active == True).first()
         if active_exam:
             target_exam_id = active_exam.id
 
     # Auto-close any expired sessions before exporting Excel
-    sync_expired_sessions(db, target_exam_id)
+    if target_exam_id:
+        sync_expired_sessions(db, target_exam_id)
             
     query = db.query(ExamResult)
     if target_exam_id:
@@ -1561,7 +1565,7 @@ def export_results_excel(exam_id: Optional[int] = None, db: Session = Depends(ge
 
 @app.get("/api/admin/results/export_pdf_zip")
 def export_results_pdf_zip(
-    exam_id: Optional[int] = None,
+    exam_id: Optional[str] = None,
     date: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -1574,8 +1578,13 @@ def export_results_pdf_zip(
         raise HTTPException(status_code=403, detail="Không có quyền truy cập")
         
     target_exam = None
-    if exam_id:
-        target_exam = db.query(Exam).filter(Exam.id == exam_id).first()
+    clean_exam_id = None
+    if exam_id is not None and str(exam_id).strip() and str(exam_id).strip().isdigit():
+        clean_exam_id = int(str(exam_id).strip())
+        target_exam = db.query(Exam).filter(Exam.id == clean_exam_id).first()
+
+    if not target_exam:
+        target_exam = db.query(Exam).filter(Exam.is_active == True, Exam.is_archived == False).first()
     if not target_exam:
         target_exam = db.query(Exam).filter(Exam.is_active == True).first()
     if not target_exam:
@@ -1608,8 +1617,6 @@ def export_results_pdf_zip(
             query = query.filter(ExamResult.start_time >= s_dt, ExamResult.start_time <= e_dt)
 
     results = query.order_by(ExamResult.id.asc()).all()
-    if not results:
-        raise HTTPException(status_code=404, detail="Chưa có thí sinh nào tham gia kỳ thi này trong khoảng thời gian được chọn")
 
     zip_bytes, exported_count = generate_batch_exam_zip(target_exam, results, db)
     safe_title = sanitize_filename(target_exam.title)

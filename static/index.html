@@ -1278,7 +1278,7 @@
                 <div style="display:flex; gap:10px; flex-wrap:wrap;">
                     <button class="btn btn-secondary btn-sm" onclick="window.print()">🖨️ In bảng điểm</button>
                     <button class="btn btn-success btn-sm" onclick="exportResultsExcel()">📥 Xuất bảng điểm Excel (.ZIP)</button>
-                    <button class="btn btn-primary btn-sm" onclick="exportAllPdfsZip()" style="background:#4338ca; border-color:#4338ca;">📦 Tải tất cả bài thi PDF (.ZIP)</button>
+                    <button class="btn btn-primary btn-sm" id="btn-export-pdf-zip" onclick="exportAllPdfsZip()" style="background:#4338ca; border-color:#4338ca;">📦 Tải tất cả bài thi PDF (.ZIP)</button>
                 </div>
             </div>
 
@@ -3723,11 +3723,24 @@
     }
 
     async function exportAllPdfsZip() {
-        showToast("Đang tạo gói nén PDF bài thi cho tất cả thí sinh...", "info");
+        const btn = document.getElementById('btn-export-pdf-zip');
+        const origHtml = btn ? btn.innerHTML : '📦 Tải tất cả bài thi PDF (.ZIP)';
+
+        if (typeof loadedResults !== 'undefined' && loadedResults && loadedResults.length === 0) {
+            showToast("Kỳ thi hiện tại chưa có thí sinh nào nộp bài để xuất file PDF bài thi.", "warning");
+            return;
+        }
+
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '⏳ Đang tạo gói PDF...';
+        }
+        showToast("Đang kết xuất và đóng gói PDF bài thi cho toàn bộ thí sinh...", "info");
+
         try {
             const token = localStorage.getItem('token');
-            const examParam = selectedExamId ? `exam_id=${selectedExamId}` : '';
-            const url = `/api/admin/results/export_pdf_zip?${examParam}`;
+            const cleanExamId = (selectedExamId && !isNaN(selectedExamId)) ? selectedExamId : '';
+            const url = cleanExamId ? `/api/admin/results/export_pdf_zip?exam_id=${cleanExamId}` : '/api/admin/results/export_pdf_zip';
             const res = await fetch(url, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
@@ -3740,8 +3753,15 @@
             const a = document.createElement('a');
             a.style.display = 'none';
             a.href = dlUrl;
-            const nowStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-            a.download = `Bai_thi_PDF_${selectedExamId || 'ky_thi'}_${nowStr}.zip`;
+
+            let filename = `Bai_thi_PDF_${cleanExamId || 'ky_thi'}_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.zip`;
+            const disposition = res.headers.get('Content-Disposition');
+            if (disposition && disposition.indexOf('filename=') !== -1) {
+                const match = disposition.match(/filename=["']?([^"';]+)["']?/);
+                if (match && match[1]) filename = match[1];
+            }
+
+            a.download = filename;
             document.body.appendChild(a);
             a.click();
             window.URL.revokeObjectURL(dlUrl);
@@ -3749,6 +3769,11 @@
             showToast("Tải trọn bộ bài thi PDF (.ZIP) thành công!", "success");
         } catch(err) {
             showToast("Lỗi tải ZIP bài thi: " + err.message, "danger");
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = origHtml;
+            }
         }
     }
 

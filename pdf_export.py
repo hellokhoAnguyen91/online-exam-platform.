@@ -5,6 +5,7 @@ import json
 import html
 import base64
 import zipfile
+import hashlib
 import datetime
 from typing import List, Dict, Any, Optional, Tuple
 
@@ -80,6 +81,53 @@ class NumberedCanvas(canvas.Canvas):
         self.restoreState()
 
 
+# --- Image Compression & Caching Cache ---
+_OPTIMIZED_IMAGE_CACHE: Dict[str, Tuple[bytes, float, float]] = {}
+
+def get_optimized_rl_image(b64_part: str, max_w: float = 460.0, max_h: float = 320.0) -> Optional[RLImage]:
+    """Compress and cache high-resolution base64 images to prevent OOM and ensure fast rendering."""
+    try:
+        cache_key = hashlib.md5(f"{len(b64_part)}_{b64_part[:64]}_{b64_part[-64:]}".encode('utf-8')).hexdigest()
+        if cache_key in _OPTIMIZED_IMAGE_CACHE:
+            opt_bytes, sw, sh = _OPTIMIZED_IMAGE_CACHE[cache_key]
+            return RLImage(io.BytesIO(opt_bytes), width=sw, height=sh)
+
+        img_data = base64.b64decode(b64_part)
+        pil_img = PILImage.open(io.BytesIO(img_data))
+        orig_w, orig_h = pil_img.size
+
+        # Scale down excessively large pixel dimensions (e.g. 2000px+ -> 800px)
+        target_pixel_w = 800
+        if orig_w > target_pixel_w:
+            target_pixel_h = int(orig_h * (target_pixel_w / float(orig_w)))
+            pil_img = pil_img.resize((target_pixel_w, target_pixel_h), PILImage.Resampling.LANCZOS)
+
+        out_buf = io.BytesIO()
+        if pil_img.mode in ('RGBA', 'LA') or (pil_img.mode == 'P' and 'transparency' in pil_img.info):
+            pil_img.save(out_buf, format='PNG', optimize=True)
+        else:
+            pil_img.convert('RGB').save(out_buf, format='JPEG', quality=82, optimize=True)
+        optimized_bytes = out_buf.getvalue()
+
+        # Calculate ReportLab point size for A4 page width
+        if orig_w > max_w:
+            scaled_h = orig_h * (max_w / float(orig_w))
+            scaled_w = max_w
+        else:
+            scaled_w = float(orig_w)
+            scaled_h = float(orig_h)
+
+        if scaled_h > max_h:
+            scaled_w = scaled_w * (max_h / scaled_h)
+            scaled_h = max_h
+
+        _OPTIMIZED_IMAGE_CACHE[cache_key] = (optimized_bytes, scaled_w, scaled_h)
+        return RLImage(io.BytesIO(optimized_bytes), width=scaled_w, height=scaled_h)
+    except Exception as e:
+        print(f"[PDF] Warning: could not parse image: {e}")
+        return None
+
+
 # --- HTML Sanitation for ReportLab XML ---
 def prepare_rl_text(text: Optional[str]) -> Tuple[str, List[RLImage]]:
     """Clean text containing HTML and extract any embedded base64 images."""
@@ -88,35 +136,15 @@ def prepare_rl_text(text: Optional[str]) -> Tuple[str, List[RLImage]]:
 
     images = []
 
-    # 1. Extract embedded base64 images
+    # 1. Extract embedded base64 images with fast compression
     img_pattern = re.compile(r'<img[^>]+src=[\'"]([^\'"]+)[\'"][^>]*>', re.IGNORECASE)
     for m in img_pattern.finditer(text):
         src = m.group(1)
         if "base64," in src:
-            try:
-                b64_part = src.split("base64,")[1]
-                img_data = base64.b64decode(b64_part)
-                pil_img = PILImage.open(io.BytesIO(img_data))
-                orig_w, orig_h = pil_img.size
-                
-                # Max width in points for A4 (margin 36 pt left & right = 595 - 72 = 523 max)
-                max_w = 460.0
-                if orig_w > max_w:
-                    scaled_h = orig_h * (max_w / float(orig_w))
-                    scaled_w = max_w
-                else:
-                    scaled_w = float(orig_w)
-                    scaled_h = float(orig_h)
-
-                # Cap height if overly tall
-                if scaled_h > 350.0:
-                    scaled_w = scaled_w * (350.0 / scaled_h)
-                    scaled_h = 350.0
-
-                rl_img = RLImage(io.BytesIO(img_data), width=scaled_w, height=scaled_h)
+            b64_part = src.split("base64,")[1]
+            rl_img = get_optimized_rl_image(b64_part)
+            if rl_img:
                 images.append(rl_img)
-            except Exception as e:
-                print(f"[PDF] Warning: could not parse image: {e}")
 
     # 2. Strip <img> tags from text
     text = img_pattern.sub("", text)
@@ -702,6 +730,21 @@ def generate_batch_exam_zip(exam: Any, results: List[Any], db: Any) -> Tuple[byt
     }
 
     with zipfile.ZipFile(zip_buffer, 'w', compression=zipfile.ZIP_DEFLATED) as zip_file:
+        if not results:
+            summary_lines.append("(Chưa có thí sinh nào nộp bài thi trong kỳ thi này)")
+            summary_lines.append("=" * 105)
+            zip_file.writestr("00_BANG_TONG_HOP_DIEM.txt", "\n".join(summary_lines).encode('utf-8'))
+            return zip_buffer.getvalue(), 0
+
+        # Try to generate companion Excel Class Summary Sheet
+        try:
+            from excel_export import generate_class_summary_excel
+            excel_bytes = generate_class_summary_excel(exam, results, db)
+            zip_file.writestr("00_Bang_Diem_Tong_Hop_Ca_Lop.xlsx", excel_bytes)
+        except Exception as e:
+            print(f"[PDF-ZIP] Note: could not attach companion Excel summary: {e}")
+
+        seen_filenames = set()
         for idx, res in enumerate(results):
             student = db.query(User).filter(User.id == res.user_id).first()
             username = student.username if student else f"sv_{res.user_id}"
@@ -781,7 +824,13 @@ def generate_batch_exam_zip(exam: Any, results: List[Any], db: Any) -> Tuple[byt
             try:
                 pdf_bytes = generate_candidate_pdf(exam_info, candidate_info, audit_questions)
                 safe_name = sanitize_filename(f"BaiThi_{username}_{fullname}")
-                zip_filename = f"{safe_name}.pdf"
+                base_filename = f"{safe_name}.pdf"
+                if base_filename in seen_filenames:
+                    base_filename = f"{safe_name}_{res.id}.pdf"
+                seen_filenames.add(base_filename)
+                
+                # Write to zip both directly and in folder
+                zip_filename = f"Chi_Tiet_Bai_Thi_PDF/{base_filename}"
                 zip_file.writestr(zip_filename, pdf_bytes)
                 exported_count += 1
             except Exception as e:
