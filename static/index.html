@@ -1993,14 +1993,25 @@
         }
     }
 
+    function sanitizeOptionDisplay(html) {
+        if (!html) return '';
+        let s = String(html);
+        s = s.split(/<div[^>]*class=["'][^"']*exam-table-wrapper/i)[0];
+        s = s.split(/<table\b/i)[0];
+        s = s.split(/(?:<br\s*\/?>\s*)*<(?:strong|b|h\d|p)[^>]*>\s*(?:(?:phần|mục|bảng|danh\s*sách)\s+)?(?:đáp\s*án|key|answer\s*key|hướng\s*dẫn\s*(?:chấm|giải))\s*[:\-–—\.]*\s*<\/(?:strong|b|h\d|p)>/i)[0];
+        return s.trim();
+    }
+
     function stripBold(html) {
         if (!html) return '';
-        return String(html)
+        let s = sanitizeOptionDisplay(html);
+        return s
             .replace(/<\/?strong[^>]*>/gi, '')
             .replace(/<\/?b[^>]*>/gi, '')
             .replace(/<\/?u[^>]*>/gi, '')
             .replace(/font-weight\s*:\s*(bold|[6-9]00)[^;"']*/gi, '')
-            .replace(/text-decoration\s*:\s*underline[^;"']*/gi, '');
+            .replace(/text-decoration\s*:\s*underline[^;"']*/gi, '')
+            .trim();
     }
 
     let currentPaletteFilter = 'all';
@@ -3112,7 +3123,7 @@
                         return `
                             <div style="padding:8px 12px; background:${isCorrect ? '#ecfdf5' : '#f8fafc'}; border:1.5px solid ${isCorrect ? '#10b981' : '#e2e8f0'}; border-radius:6px; display:flex; align-items:flex-start; gap:8px;">
                                 <strong style="color:${isCorrect ? '#059669' : '#334155'}; font-size:0.95rem;">${isCorrect ? '☑️' : '◻️'} ${keyUpper}:</strong>
-                                <span style="flex:1; word-break:break-word;">${q['option_' + k] || ''}</span>
+                                <span style="flex:1; word-break:break-word;">${sanitizeOptionDisplay(q['option_' + k] || '')}</span>
                             </div>
                         `;
                     }).join('')}
@@ -3136,7 +3147,7 @@
                         return `
                             <div style="padding:8px 12px; background:${isCorrect ? '#ecfdf5' : '#f8fafc'}; border:1.5px solid ${isCorrect ? '#10b981' : '#e2e8f0'}; border-radius:6px; display:flex; align-items:flex-start; gap:8px;">
                                 <strong style="color:${isCorrect ? '#059669' : '#334155'}; font-size:0.95rem;">${isCorrect ? '✓' : ''} ${keyUpper}:</strong>
-                                <span style="flex:1; word-break:break-word;">${q['option_' + k] || ''}</span>
+                                <span style="flex:1; word-break:break-word;">${sanitizeOptionDisplay(q['option_' + k] || '')}</span>
                             </div>
                         `;
                     }).join('')}
@@ -4032,7 +4043,7 @@
                             return `
                                 <div class="${optClass}">
                                     <strong>${optChar}.</strong>
-                                    <span style="flex:1;">${q[optKey]}</span>
+                                    <span style="flex:1;">${sanitizeOptionDisplay(q[optKey])}</span>
                                     ${note}
                                 </div>
                             `;
@@ -4077,7 +4088,7 @@
                         return `
                             <div class="${optClass}">
                                 <strong>${optChar}.</strong>
-                                <span style="flex:1;">${q[optKey]}</span>
+                                <span style="flex:1;">${sanitizeOptionDisplay(q[optKey])}</span>
                                 ${note}
                             </div>
                         `;

@@ -9,6 +9,7 @@ import hashlib
 import datetime
 from typing import List, Dict, Any, Optional, Tuple
 
+from docx_parser import clean_exam_option
 from PIL import Image as PILImage
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
@@ -537,12 +538,12 @@ def generate_candidate_pdf(exam_info: Dict[str, Any], candidate_info: Dict[str, 
             correct_disp = str(correct_raw) if correct_raw is not None else ""
 
         options = [
-            ("A", q.get("option_a", "")),
-            ("B", q.get("option_b", "")),
-            ("C", q.get("option_c", "")),
-            ("D", q.get("option_d", "")),
-            ("E", q.get("option_e", "")),
-            ("F", q.get("option_f", ""))
+            ("A", clean_exam_option(q.get("option_a", ""))),
+            ("B", clean_exam_option(q.get("option_b", ""))),
+            ("C", clean_exam_option(q.get("option_c", ""))),
+            ("D", clean_exam_option(q.get("option_d", ""))),
+            ("E", clean_exam_option(q.get("option_e", ""))),
+            ("F", clean_exam_option(q.get("option_f", "")))
         ]
 
         opt_rows = []
@@ -822,12 +823,12 @@ def generate_batch_exam_zip(exam: Any, results: List[Any], db: Any) -> Tuple[byt
                             "q_idx": q_pos + 1,
                             "id": q.id,
                             "content": q.content,
-                            "option_a": q.option_a,
-                            "option_b": q.option_b,
-                            "option_c": q.option_c,
-                            "option_d": q.option_d,
-                            "option_e": getattr(q, 'option_e', '') or '',
-                            "option_f": getattr(q, 'option_f', '') or '',
+                            "option_a": clean_exam_option(q.option_a),
+                            "option_b": clean_exam_option(q.option_b),
+                            "option_c": clean_exam_option(q.option_c),
+                            "option_d": clean_exam_option(q.option_d),
+                            "option_e": clean_exam_option(getattr(q, 'option_e', '') or ''),
+                            "option_f": clean_exam_option(getattr(q, 'option_f', '') or ''),
                             "question_type": getattr(q, 'question_type', 'multiple_choice'),
                             "score_weight": getattr(q, 'score_weight', 1.0),
                             "selected": selected,

@@ -25,7 +25,7 @@ from jose import JWTError, jwt
 
 from database import engine, SessionLocal
 from models import User, Exam, Question, ExamResult, migrate_database
-from docx_parser import parse_docx_questions, strip_question_prefix
+from docx_parser import parse_docx_questions, strip_question_prefix, clean_exam_option
 from student_parser import parse_student_file
 from pdf_export import generate_batch_exam_zip, generate_candidate_pdf, sanitize_filename
 from excel_export import generate_candidate_excel, generate_batch_excel_zip, generate_candidate_audit_excel
@@ -638,12 +638,12 @@ async def upload_questions(
         db.add(Question(
             exam_id=target_exam.id,
             content=strip_question_prefix(q['content']),
-            option_a=q.get('option_a', ''),
-            option_b=q.get('option_b', ''),
-            option_c=q.get('option_c', ''),
-            option_d=q.get('option_d', ''),
-            option_e=q.get('option_e', ''),
-            option_f=q.get('option_f', ''),
+            option_a=clean_exam_option(q.get('option_a', '')),
+            option_b=clean_exam_option(q.get('option_b', '')),
+            option_c=clean_exam_option(q.get('option_c', '')),
+            option_d=clean_exam_option(q.get('option_d', '')),
+            option_e=clean_exam_option(q.get('option_e', '')),
+            option_f=clean_exam_option(q.get('option_f', '')),
             correct_option=q['correct_option'],
             question_type=q.get('question_type', 'multiple_choice'),
             score_weight=q.get('score_weight', 1.0),
@@ -679,12 +679,12 @@ def get_questions(exam_id: Optional[int] = None, db: Session = Depends(get_db), 
         "id": q.id,
         "exam_id": q.exam_id,
         "content": q.content,
-        "option_a": q.option_a,
-        "option_b": q.option_b,
-        "option_c": q.option_c,
-        "option_d": q.option_d,
-        "option_e": getattr(q, 'option_e', '') or '',
-        "option_f": getattr(q, 'option_f', '') or '',
+        "option_a": clean_exam_option(q.option_a),
+        "option_b": clean_exam_option(q.option_b),
+        "option_c": clean_exam_option(q.option_c),
+        "option_d": clean_exam_option(q.option_d),
+        "option_e": clean_exam_option(getattr(q, 'option_e', '') or ''),
+        "option_f": clean_exam_option(getattr(q, 'option_f', '') or ''),
         "correct_option": q.correct_option,
         "explanation": q.explanation,
         "question_type": q.question_type,
@@ -723,12 +723,12 @@ def create_question_manual(payload: QuestionCreate, db: Session = Depends(get_db
     q = Question(
         exam_id=target_exam_id,
         content=content,
-        option_a=payload.option_a.strip() if payload.option_a else "",
-        option_b=payload.option_b.strip() if payload.option_b else "",
-        option_c=payload.option_c.strip() if payload.option_c else "",
-        option_d=payload.option_d.strip() if payload.option_d else "",
-        option_e=payload.option_e.strip() if payload.option_e else "",
-        option_f=payload.option_f.strip() if payload.option_f else "",
+        option_a=clean_exam_option(payload.option_a.strip() if payload.option_a else ""),
+        option_b=clean_exam_option(payload.option_b.strip() if payload.option_b else ""),
+        option_c=clean_exam_option(payload.option_c.strip() if payload.option_c else ""),
+        option_d=clean_exam_option(payload.option_d.strip() if payload.option_d else ""),
+        option_e=clean_exam_option(payload.option_e.strip() if payload.option_e else ""),
+        option_f=clean_exam_option(payload.option_f.strip() if payload.option_f else ""),
         correct_option=correct_opt,
         explanation=payload.explanation.strip() if payload.explanation else None,
         question_type=q_type,
@@ -743,12 +743,12 @@ def create_question_manual(payload: QuestionCreate, db: Session = Depends(get_db
             "id": q.id,
             "exam_id": q.exam_id,
             "content": q.content,
-            "option_a": q.option_a,
-            "option_b": q.option_b,
-            "option_c": q.option_c,
-            "option_d": q.option_d,
-            "option_e": getattr(q, 'option_e', '') or '',
-            "option_f": getattr(q, 'option_f', '') or '',
+            "option_a": clean_exam_option(q.option_a),
+            "option_b": clean_exam_option(q.option_b),
+            "option_c": clean_exam_option(q.option_c),
+            "option_d": clean_exam_option(q.option_d),
+            "option_e": clean_exam_option(getattr(q, 'option_e', '') or ''),
+            "option_f": clean_exam_option(getattr(q, 'option_f', '') or ''),
             "correct_option": q.correct_option,
             "explanation": q.explanation,
             "question_type": q.question_type,
@@ -770,17 +770,17 @@ def update_question_manual(question_id: int, payload: QuestionUpdate, db: Sessio
             raise HTTPException(status_code=400, detail="Nội dung câu hỏi không được để trống")
         q.content = c
     if payload.option_a is not None:
-        q.option_a = payload.option_a.strip()
+        q.option_a = clean_exam_option(payload.option_a.strip())
     if payload.option_b is not None:
-        q.option_b = payload.option_b.strip()
+        q.option_b = clean_exam_option(payload.option_b.strip())
     if payload.option_c is not None:
-        q.option_c = payload.option_c.strip()
+        q.option_c = clean_exam_option(payload.option_c.strip())
     if payload.option_d is not None:
-        q.option_d = payload.option_d.strip()
+        q.option_d = clean_exam_option(payload.option_d.strip())
     if payload.option_e is not None:
-        q.option_e = payload.option_e.strip()
+        q.option_e = clean_exam_option(payload.option_e.strip())
     if payload.option_f is not None:
-        q.option_f = payload.option_f.strip()
+        q.option_f = clean_exam_option(payload.option_f.strip())
     if payload.question_type is not None:
         q.question_type = payload.question_type
     if payload.score_weight is not None:
@@ -1490,6 +1490,11 @@ def get_result_detail(result_id: int, db: Session = Depends(get_db), current_use
         s = res.duration_seconds % 60
         duration_str = f"{m} phút {s} giây"
         
+    for q in audit_questions:
+        for opt_key in ['option_a', 'option_b', 'option_c', 'option_d', 'option_e', 'option_f']:
+            if opt_key in q:
+                q[opt_key] = clean_exam_option(q[opt_key])
+
     mc_qs = [q for q in audit_questions if q.get("question_type") != "essay"]
     essay_qs = [q for q in audit_questions if q.get("question_type") == "essay"]
     audit_questions = mc_qs + essay_qs
@@ -1894,12 +1899,12 @@ def get_exam(request: Request, db: Session = Depends(get_db), current_user: User
             q_list.append({
                 "id": q.id,
                 "content": q.content,
-                "option_a": q.option_a,
-                "option_b": q.option_b,
-                "option_c": q.option_c,
-                "option_d": q.option_d,
-                "option_e": getattr(q, 'option_e', '') or '',
-                "option_f": getattr(q, 'option_f', '') or '',
+                "option_a": clean_exam_option(q.option_a),
+                "option_b": clean_exam_option(q.option_b),
+                "option_c": clean_exam_option(q.option_c),
+                "option_d": clean_exam_option(q.option_d),
+                "option_e": clean_exam_option(getattr(q, 'option_e', '') or ''),
+                "option_f": clean_exam_option(getattr(q, 'option_f', '') or ''),
                 "question_type": q.question_type or 'multiple_choice',
                 "score_weight": q.score_weight
             })
@@ -2215,6 +2220,9 @@ def review_my_exam(db: Session = Depends(get_db), current_user: User = Depends(g
     safe_audit_questions = []
     for item in audit_questions:
         item_copy = dict(item)
+        for opt_key in ['option_a', 'option_b', 'option_c', 'option_d', 'option_e', 'option_f']:
+            if opt_key in item_copy:
+                item_copy[opt_key] = clean_exam_option(item_copy[opt_key])
         if not can_show_answers:
             item_copy["correct"] = None
             item_copy["is_correct"] = None

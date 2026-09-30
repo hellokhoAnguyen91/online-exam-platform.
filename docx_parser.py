@@ -535,6 +535,114 @@ MULTI_SELECT_HINT_REGEX = re.compile(
     re.IGNORECASE
 )
 
+# Header marking the Answer Key section at the end of the Word document
+ANSWER_SECTION_HEADER_REGEX = re.compile(
+    r'^\s*(?:(?:phần|mục|bảng|danh\s*sách)\s+)?(?:đáp\s*án|key|answer\s*key|hướng\s*dẫn\s*(?:chấm|giải)|bảng\s*tra\s*đáp\s*án|đáp\s*án\s*tham\s*khảo|key\s*đáp\s*án)(?:\s*(?:đề\s*thi|tham\s*khảo|chi\s*tiết))?\s*[:\-–—\.]*\s*$',
+    re.IGNORECASE
+)
+
+
+def clean_exam_option(text: Optional[str]) -> str:
+    """
+    Sanitizes option text to remove any accidental trailing answer key tables,
+    section headers, or wrappers, preventing answers from leaking in options.
+    """
+    if not text:
+        return ""
+    s = str(text)
+    # Truncate at answer table wrapper
+    s = re.split(r'<div[^>]*class=[\'"][^\'"]*exam-table-wrapper', s, flags=re.IGNORECASE)[0]
+    # Truncate at table element
+    s = re.split(r'<table\b', s, flags=re.IGNORECASE)[0]
+    # Truncate at trailing Answer section headings (e.g. <br><strong>ĐÁP ÁN</strong>)
+    s = re.split(
+        r'(?:<br\s*/?>\s*)*<(?:strong|b|h\d|p)[^>]*>\s*(?:(?:phần|mục|bảng|danh\s*sách)\s+)?(?:đáp\s*án|key|answer\s*key|hướng\s*dẫn\s*(?:chấm|giải))\s*[:\-–—\.]*\s*</(?:strong|b|h\d|p)>',
+        s,
+        flags=re.IGNORECASE
+    )[0]
+    return s.strip()
+
+
+def extract_answers_from_table(tbl) -> Tuple[bool, Dict[int, str]]:
+    """
+    Detects if a docx table is an answer key table and extracts question_num -> answer_letter mapping.
+    Returns (is_answer_table: bool, answers: Dict[int, str]).
+    """
+    answers: Dict[int, str] = {}
+    q_cell_pattern = re.compile(r'^(?:câu\s*)?(\d+)[\.\:\-\s]+([A-Ha-h])$', re.IGNORECASE)
+
+    # Method 1: Cells containing "1. A", "2: B", "Câu 3: C"
+    for row in tbl.rows:
+        for cell in row.cells:
+            text = cell.text.strip()
+            if not text:
+                continue
+            m = q_cell_pattern.match(text)
+            if m:
+                q_num = int(m.group(1))
+                ans = m.group(2).upper()
+                answers[q_num] = ans
+
+    if len(answers) >= 2:
+        return True, answers
+
+    # Method 2: Pairwise adjacent cells in each row: cell 0 = "1", cell 1 = "A"
+    for row in tbl.rows:
+        row_texts = [c.text.strip() for c in row.cells]
+        i = 0
+        while i < len(row_texts) - 1:
+            val1 = row_texts[i]
+            val2 = row_texts[i + 1]
+            if re.match(r'^(?:câu\s*)?(\d+)$', val1, re.IGNORECASE) and re.match(r'^[A-Ha-h]$', val2):
+                m_num = re.search(r'\d+', val1)
+                if m_num:
+                    q_num = int(m_num.group())
+                    answers[q_num] = val2.upper()
+                i += 2
+            else:
+                i += 1
+
+    if len(answers) >= 2:
+        return True, answers
+
+    # Method 3: Horizontal grid (Row of question numbers, row of answer letters)
+    if len(tbl.rows) >= 2:
+        for r_idx in range(len(tbl.rows) - 1):
+            r1_cells = [c.text.strip() for c in tbl.rows[r_idx].cells]
+            r2_cells = [c.text.strip() for c in tbl.rows[r_idx + 1].cells]
+            if len(r1_cells) == len(r2_cells) and len(r1_cells) >= 2:
+                grid_matches = 0
+                temp_grid = {}
+                for c1, c2 in zip(r1_cells, r2_cells):
+                    if re.match(r'^(?:câu\s*)?(\d+)$', c1, re.IGNORECASE) and re.match(r'^[A-Ha-h]$', c2):
+                        m_num = re.search(r'\d+', c1)
+                        if m_num:
+                            q_num = int(m_num.group())
+                            temp_grid[q_num] = c2.upper()
+                            grid_matches += 1
+                if grid_matches >= 2:
+                    answers.update(temp_grid)
+                    return True, answers
+
+    # Method 4: Check if header row contains Answer Key indicators
+    if tbl.rows:
+        first_row_text = " ".join(c.text.strip().lower() for c in tbl.rows[0].cells)
+        has_ans_kw = any(kw in first_row_text for kw in ["đáp án", "dap an", "answer", "key", "đ/a"])
+        has_q_kw = any(kw in first_row_text for kw in ["câu", "cau", "stt", "q", "question"])
+        if has_ans_kw and has_q_kw:
+            return True, answers
+
+    return False, answers
+
+
+def extract_answers_from_text(text: str) -> Dict[int, str]:
+    """Extracts question answers from text format like '1. A   2. B   3. C...'"""
+    answers: Dict[int, str] = {}
+    pattern = re.compile(r'(?:câu\s*)?(\d+)[\.\:\-\s]+([A-Ha-h])\b', re.IGNORECASE)
+    for m in pattern.finditer(text):
+        answers[int(m.group(1))] = m.group(2).upper()
+    return answers
+
 
 def detect_section_header(text: str) -> Optional[str]:
     """
@@ -656,12 +764,12 @@ def parse_docx_questions(doc_file) -> List[Dict[str, Any]]:
                 "content": curr_q['content'],
                 "question_type": "multi_select",
                 "score_weight": score_weight,
-                "option_a": mapped_opts.get('A', ''),
-                "option_b": mapped_opts.get('B', ''),
-                "option_c": mapped_opts.get('C', ''),
-                "option_d": mapped_opts.get('D', ''),
-                "option_e": mapped_opts.get('E', ''),
-                "option_f": mapped_opts.get('F', ''),
+                "option_a": clean_exam_option(mapped_opts.get('A', '')),
+                "option_b": clean_exam_option(mapped_opts.get('B', '')),
+                "option_c": clean_exam_option(mapped_opts.get('C', '')),
+                "option_d": clean_exam_option(mapped_opts.get('D', '')),
+                "option_e": clean_exam_option(mapped_opts.get('E', '')),
+                "option_f": clean_exam_option(mapped_opts.get('F', '')),
                 "correct_option": ",".join(opt_chars[:min(len(plus_opts), len(opt_chars))])
             })
         elif len(opts) >= 2:
@@ -707,12 +815,12 @@ def parse_docx_questions(doc_file) -> List[Dict[str, Any]]:
                 "content": curr_q['content'],
                 "question_type": q_type,
                 "score_weight": score_weight,
-                "option_a": opts.get('A', ''),
-                "option_b": opts.get('B', ''),
-                "option_c": opts.get('C', ''),
-                "option_d": opts.get('D', ''),
-                "option_e": opts.get('E', ''),
-                "option_f": opts.get('F', ''),
+                "option_a": clean_exam_option(opts.get('A', '')),
+                "option_b": clean_exam_option(opts.get('B', '')),
+                "option_c": clean_exam_option(opts.get('C', '')),
+                "option_d": clean_exam_option(opts.get('D', '')),
+                "option_e": clean_exam_option(opts.get('E', '')),
+                "option_f": clean_exam_option(opts.get('F', '')),
                 "correct_option": correct_str
             })
         else:
@@ -733,6 +841,9 @@ def parse_docx_questions(doc_file) -> List[Dict[str, Any]]:
             })
         curr_q = None
 
+    in_answer_key_section = False
+    extracted_answer_keys: Dict[int, str] = {}
+
     for item_type, item in body_items:
         if item_type == 'p':
             para = item
@@ -741,6 +852,21 @@ def parse_docx_questions(doc_file) -> List[Dict[str, Any]]:
             
             # If completely empty of both text and media, skip
             if not clean_text and not has_media:
+                continue
+
+            # -2. Check for Answer Key Section Header (ĐÁP ÁN / BẢNG ĐÁP ÁN / ANSWER KEY...)
+            if ANSWER_SECTION_HEADER_REGEX.match(clean_text):
+                finalize_current_q()
+                in_answer_key_section = True
+                curr_q = None
+                last_opt_key = None
+                continue
+
+            # If already in answer key section, extract text keys and NEVER append to question
+            if in_answer_key_section:
+                txt_ans = extract_answers_from_text(clean_text)
+                if txt_ans:
+                    extracted_answer_keys.update(txt_ans)
                 continue
                 
             # If paragraph has NO text but HAS media (drawings, VML, math):
@@ -898,6 +1024,17 @@ def parse_docx_questions(doc_file) -> List[Dict[str, Any]]:
 
         elif item_type == 'tbl':
             tbl = item
+            # Intercept answer key tables or tables in answer key section
+            is_ans_tbl, ans_map = extract_answers_from_table(tbl)
+            if is_ans_tbl or in_answer_key_section:
+                finalize_current_q()
+                in_answer_key_section = True
+                curr_q = None
+                last_opt_key = None
+                if ans_map:
+                    extracted_answer_keys.update(ans_map)
+                continue
+
             # Check if this table contains questions or options
             table_has_options = False
             extracted_opts = {}
@@ -944,6 +1081,14 @@ def parse_docx_questions(doc_file) -> List[Dict[str, Any]]:
                         curr_q['opts'][last_opt_key] += "<br>" + tbl_html
 
     finalize_current_q()
+
+    # Backfill correct options from answer key table/section if questions lack correct_option
+    if extracted_answer_keys:
+        for q_idx, ans_char in extracted_answer_keys.items():
+            if 1 <= q_idx <= len(questions):
+                target_q = questions[q_idx - 1]
+                if not target_q.get("correct_option"):
+                    target_q["correct_option"] = ans_char
 
     # If section headers (e.g. PHẦN I: TRẮC NGHIỆM, PHẦN II: TỰ LUẬN) were present,
     # guarantee strict separation: Part I (Multiple Choice & Multi Select) first, Part II (Essay) second
