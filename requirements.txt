@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+python-multipart
+python-docx
+pandas
+openpyxl
+sqlalchemy
+pydantic
+passlib[bcrypt]
+bcrypt==4.0.1
+python-jose[cryptography]
+httpx
+reportlab
+pillow

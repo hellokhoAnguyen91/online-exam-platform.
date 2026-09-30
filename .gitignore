@@ -1,0 +1,19 @@
+# Virtual Environment
+venv/
+.venv/
+env/
+ENV/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# SQLite WAL temp files
+sql_app.db-shm
+sql_app.db-wal
+
+# OS generated
+.DS_Store
+Thumbs.db
