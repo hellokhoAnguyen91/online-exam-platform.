@@ -706,20 +706,9 @@ def generate_batch_exam_zip(exam: Any, results: List[Any], db: Any) -> Tuple[byt
 
     zip_buffer = io.BytesIO()
     exported_count = 0
-    summary_lines = []
 
     exam_title = exam.title if exam else "Kỳ thi trắc nghiệm"
     exam_code = getattr(exam, 'code', '') or ''
-    now_str = datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-
-    summary_lines.append("=" * 80)
-    summary_lines.append(f" BÁO CÁO TỔNG HỢP KẾT QUẢ KỲ THI TRỰC TUYẾN")
-    summary_lines.append(f" Kỳ thi: {exam_title} (Mã: {exam_code})")
-    summary_lines.append(f" Thời gian xuất báo cáo: {now_str}")
-    summary_lines.append(f" Tổng số thí sinh dự thi: {len(results)}")
-    summary_lines.append("=" * 80)
-    summary_lines.append(f"{'STT':<5} | {'MSSV':<15} | {'HỌ VÀ TÊN':<28} | {'ĐIỂM':<7} | {'SỐ CÂU ĐÚNG':<12} | {'THỜI LƯỢNG':<10} | {'TRẠNG THÁI'}")
-    summary_lines.append("-" * 105)
 
     exam_info = {
         "id": exam.id if exam else 1,
@@ -730,19 +719,16 @@ def generate_batch_exam_zip(exam: Any, results: List[Any], db: Any) -> Tuple[byt
     }
 
     with zipfile.ZipFile(zip_buffer, 'w', compression=zipfile.ZIP_DEFLATED) as zip_file:
-        if not results:
-            summary_lines.append("(Chưa có thí sinh nào nộp bài thi trong kỳ thi này)")
-            summary_lines.append("=" * 105)
-            zip_file.writestr("00_BANG_TONG_HOP_DIEM.txt", "\n".join(summary_lines).encode('utf-8'))
-            return zip_buffer.getvalue(), 0
-
-        # Try to generate companion Excel Class Summary Sheet
+        # Generate companion Excel Class Summary Sheet
         try:
             from excel_export import generate_class_summary_excel
             excel_bytes = generate_class_summary_excel(exam, results, db)
             zip_file.writestr("00_Bang_Diem_Tong_Hop_Ca_Lop.xlsx", excel_bytes)
         except Exception as e:
             print(f"[PDF-ZIP] Note: could not attach companion Excel summary: {e}")
+
+        if not results:
+            return zip_buffer.getvalue(), 0
 
         seen_filenames = set()
         for idx, res in enumerate(results):
@@ -829,26 +815,13 @@ def generate_batch_exam_zip(exam: Any, results: List[Any], db: Any) -> Tuple[byt
                     base_filename = f"{safe_name}_{res.id}.pdf"
                 seen_filenames.add(base_filename)
                 
-                # Write to zip both directly and in folder
-                zip_filename = f"Chi_Tiet_Bai_Thi_PDF/{base_filename}"
-                zip_file.writestr(zip_filename, pdf_bytes)
+                # Write to zip directly at root
+                zip_file.writestr(base_filename, pdf_bytes)
                 exported_count += 1
             except Exception as e:
                 print(f"[PDF] Error generating PDF for candidate {username}: {e}")
                 import traceback
                 traceback.print_exc()
-
-            # Record in summary
-            score_str = f"{res.score:.2f}" if res.score is not None else "Chờ chấm"
-            correct_str = f"{res.correct_count or 0}/{res.total_questions or len(audit_questions)}" if res.score is not None else f"-/{res.total_questions or len(audit_questions)}"
-            summary_lines.append(
-                f"{idx+1:<5} | {username:<15} | {fullname:<28} | {score_str:<10} | {correct_str:<12} | {duration_str:<10} | {status_text}"
-            )
-
-        summary_lines.append("=" * 105)
-        summary_lines.append(f"Tổng cộng đã xuất thành công: {exported_count} file PDF bài thi.")
-        summary_text = "\n".join(summary_lines)
-        zip_file.writestr("00_BANG_TONG_HOP_DIEM.txt", summary_text.encode('utf-8'))
 
     zip_bytes = zip_buffer.getvalue()
     return zip_bytes, exported_count

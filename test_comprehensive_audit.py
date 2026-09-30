@@ -216,12 +216,12 @@ def test_audit_suite():
         }, headers=admin_headers)
         assert good_score_res.status_code == 200, f"Valid essay score failed: {good_score_res.text}"
         
-        # Check scaled score on 10.0 scale:
-        # Max score sum = 3.0 (Q1) + 2.0 (Q2) + 2.0 (Q3) + 3.0 (Q4) = 10.0
-        # Earned sum = 1.0 (Q1) + 2.0 (Q2) + 1.5 (Q3) + 0.0 (Q4) = 4.5
-        # Scaled = (4.5 / 10.0) * 10.0 = 4.5
+        # With 7.0 MC / 3.0 Essay default split:
+        # MC: raw earned (1.0 + 2.0) / raw total 5.0 * 7.0 = 4.2
+        # Essay: raw earned 1.5 / raw total 5.0 * 3.0 = 0.9
+        # Total = 4.2 + 0.9 = 5.1
         db.refresh(result_entry)
-        assert abs(result_entry.score - 4.5) < 1e-4, f"Final score expected 4.5, got {result_entry.score}"
+        assert abs(result_entry.score - 5.1) < 1e-4, f"Final score expected 5.1, got {result_entry.score}"
         assert result_entry.max_score == 10.0
         print(f"  ✓ Essay scoring complete: final score = {result_entry.score} / {result_entry.max_score}")
 
@@ -278,7 +278,7 @@ def test_audit_suite():
         assert exported_count == 1
         with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
             namelist = zf.namelist()
-            assert "00_BANG_TONG_HOP_DIEM.txt" in namelist
+            assert "00_Bang_Diem_Tong_Hop_Ca_Lop.xlsx" in namelist
             assert any(n.endswith(".pdf") for n in namelist)
         print(f"  ✓ Batch ZIP export generated successfully ({len(zip_bytes)} bytes)")
 
