@@ -1277,7 +1277,7 @@
                 </div>
                 <div style="display:flex; gap:10px; flex-wrap:wrap;">
                     <button class="btn btn-secondary btn-sm" onclick="window.print()">🖨️ In bảng điểm</button>
-                    <button class="btn btn-success btn-sm" onclick="exportResultsExcel()">📥 Xuất bảng điểm Excel</button>
+                    <button class="btn btn-success btn-sm" onclick="exportResultsExcel()">📥 Xuất bảng điểm Excel (.ZIP)</button>
                     <button class="btn btn-primary btn-sm" onclick="exportAllPdfsZip()" style="background:#4338ca; border-color:#4338ca;">📦 Tải tất cả bài thi PDF (.ZIP)</button>
                 </div>
             </div>
@@ -3686,7 +3686,7 @@
     }
 
     async function exportResultsExcel() {
-        showToast("Đang xuất bảng điểm Excel...", "info");
+        showToast("Đang tạo gói nén Excel gồm Bảng điểm tổng hợp và Chi tiết bài làm của tất cả thí sinh...", "info");
         try {
             const token = localStorage.getItem('token');
             const url = selectedExamId ? `/api/admin/results/export?exam_id=${selectedExamId}` : '/api/admin/results/export';
@@ -3695,21 +3695,30 @@
             });
             if(!res.ok) {
                 const err = await res.json().catch(() => ({}));
-                throw new Error(err.detail || `Lỗi xuất bảng điểm (Mã: ${res.status})`);
+                throw new Error(err.detail || `Lỗi xuất gói bảng điểm (Mã: ${res.status})`);
             }
             const blob = await res.blob();
             const dlUrl = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.style.display = 'none';
             a.href = dlUrl;
-            a.download = `bang_diem_${selectedExamId || 'ky_thi'}.xlsx`;
+
+            // Extract filename from Content-Disposition header if available
+            let filename = `Goi_Bang_Diem_Excel_${selectedExamId || 'ky_thi'}_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.zip`;
+            const disposition = res.headers.get('Content-Disposition');
+            if (disposition && disposition.indexOf('filename=') !== -1) {
+                const match = disposition.match(/filename=["']?([^"';]+)["']?/);
+                if (match && match[1]) filename = match[1];
+            }
+
+            a.download = filename;
             document.body.appendChild(a);
             a.click();
             window.URL.revokeObjectURL(dlUrl);
             a.remove();
-            showToast("Xuất bảng điểm thành công!", "success");
+            showToast("Tải trọn bộ gói bảng điểm Excel (.ZIP) thành công!", "success");
         } catch(err) {
-            showToast("Lỗi xuất bảng điểm: " + err.message, "danger");
+            showToast("Lỗi xuất gói bảng điểm Excel: " + err.message, "danger");
         }
     }
 

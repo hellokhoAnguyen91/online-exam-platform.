@@ -28,7 +28,7 @@ from models import User, Exam, Question, ExamResult, migrate_database
 from docx_parser import parse_docx_questions, strip_question_prefix
 from student_parser import parse_student_file
 from pdf_export import generate_batch_exam_zip, generate_candidate_pdf, sanitize_filename
-from excel_export import generate_candidate_excel
+from excel_export import generate_candidate_excel, generate_batch_excel_zip, generate_candidate_audit_excel
 
 SECRET_KEY = "super-secret-key-for-exam-platform-change-in-production"
 ALGORITHM = "HS256"
@@ -1528,6 +1528,7 @@ def get_result_detail(result_id: int, db: Session = Depends(get_db), current_use
 
 @app.get("/api/admin/results/export")
 def export_results_excel(exam_id: Optional[int] = None, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Export complete Excel package (.ZIP) containing class summary sheet and all candidate audit sheets."""
     if not current_user.is_admin:
         raise HTTPException(status_code=403, detail="Không có quyền truy cập")
         
@@ -1547,39 +1548,16 @@ def export_results_excel(exam_id: Optional[int] = None, db: Session = Depends(ge
     results = query.order_by(desc(ExamResult.score)).all()
     exam = db.query(Exam).filter(Exam.id == target_exam_id).first() if target_exam_id else None
     
-    data = []
-    for idx, r in enumerate(results):
-        user = db.query(User).filter(User.id == r.user_id).first()
-        dur_str = f"{r.duration_seconds // 60}p {r.duration_seconds % 60}s" if r.duration_seconds else ""
-        pct = round(r.correct_count / r.total_questions * 100, 1) if r.total_questions else 0.0
-        score_val = r.score if r.score is not None else "Chờ chấm điểm"
-        status_val = "Chờ chấm điểm" if r.score is None else ("Hoàn thành" if r.status == "submitted" else r.status)
-        data.append({
-            "STT": idx + 1,
-            "MSSV": user.username if user else "",
-            "Họ và tên": user.fullname if user else "",
-            "Điểm số (Thang 10)": score_val,
-            "Số câu đúng": r.correct_count if r.score is not None else "Chờ chấm",
-            "Tổng số câu": r.total_questions,
-            "Tỷ lệ đúng (%)": f"{pct}%" if r.score is not None else "-",
-            "Thời lượng": dur_str,
-            "Thời gian bắt đầu": r.start_time.strftime("%Y-%m-%d %H:%M:%S") if r.start_time else "",
-            "Thời gian nộp bài": r.submit_time.strftime("%Y-%m-%d %H:%M:%S") if r.submit_time else "",
-            "Trạng thái": status_val
-        })
-        
-    df = pd.DataFrame(data)
-    stream = io.BytesIO()
-    with pd.ExcelWriter(stream, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name="Bảng điểm")
-    stream.seek(0)
+    zip_bytes, exported_count = generate_batch_excel_zip(exam, results, db)
     
-    exam_title_slug = re.sub(r'[^a-zA-Z0-9_-]', '_', exam.title) if exam else "ket_qua_thi"
-    filename = f"Bang_Diem_{exam_title_slug}_{datetime.datetime.now().strftime('%Y%m%d')}.xlsx"
+    exam_title_slug = sanitize_filename(exam.title) if exam else "ky_thi"
+    now_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"Goi_Bang_Diem_Excel_{exam_title_slug}_{now_str}.zip"
+    
     return StreamingResponse(
-        stream,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f"attachment; filename={filename}"}
+        io.BytesIO(zip_bytes),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
     )
 
 @app.get("/api/admin/results/export_pdf_zip")
@@ -1755,83 +1733,10 @@ def export_single_result_excel(
     exam = db.query(Exam).filter(Exam.id == res.exam_id).first()
     student = db.query(User).filter(User.id == res.user_id).first()
     
-    # Audit detail reconstruction
-    audit_questions = []
-    if res.answers_detail:
-        try:
-            audit_questions = json.loads(res.answers_detail)
-        except Exception:
-            audit_questions = []
-            
-    if not audit_questions and res.questions:
-        try:
-            q_ids = json.loads(res.questions) if isinstance(res.questions, str) else res.questions
-            raw_answers = json.loads(res.answers) if (res.answers and isinstance(res.answers, str)) else (res.answers or {})
-            questions = db.query(Question).filter(Question.id.in_(q_ids)).all()
-            q_dict = {q.id: q for q in questions}
-            for q_pos, qid in enumerate(q_ids):
-                q = q_dict.get(qid)
-                if not q:
-                    continue
-                selected = raw_answers.get(str(qid)) or raw_answers.get(qid)
-                is_corr = (selected == q.correct_option) if selected else False
-                st = "correct" if is_corr else ("incorrect" if selected else "unanswered")
-                audit_questions.append({
-                    "q_idx": q_pos + 1,
-                    "id": q.id,
-                    "content": q.content,
-                    "option_a": q.option_a,
-                    "option_b": q.option_b,
-                    "option_c": q.option_c,
-                    "option_d": q.option_d,
-                    "option_e": getattr(q, 'option_e', '') or '',
-                    "option_f": getattr(q, 'option_f', '') or '',
-                    "question_type": q.question_type or 'multiple_choice',
-                    "score_weight": q.score_weight or 1.0,
-                    "selected": selected,
-                    "correct": q.correct_option,
-                    "is_correct": is_corr,
-                    "status": st,
-                    "earned_score": (q.score_weight or 1.0) if is_corr else 0.0,
-                    "explanation": getattr(q, 'explanation', '') or ''
-                })
-        except Exception as e:
-            print(f"Error rebuilding audit: {e}")
-
-    dur_sec = res.duration_seconds or 0
-    dur_str = f"{dur_sec // 60}p {dur_sec % 60:02d}s" if dur_sec > 0 else "-"
-    start_str = res.start_time.strftime("%d/%m/%Y %H:%M:%S") if res.start_time else "-"
-    submit_str = res.submit_time.strftime("%d/%m/%Y %H:%M:%S") if res.submit_time else "-"
-    status_text = "Đã nộp bài" if res.status == "submitted" else "Đang làm dở"
-    if res.status == "auto_submitted":
-        status_text = "Nộp tự động (Hết giờ)"
-
-    exam_info = {
-        "id": exam.id if exam else 1,
-        "title": exam.title if exam else "Kỳ thi trắc nghiệm",
-        "code": getattr(exam, 'code', '') or '',
-        "duration_minutes": getattr(exam, 'duration_minutes', 30),
-        "num_questions": getattr(exam, 'num_questions', 10),
-        "mc_max_score": getattr(exam, 'mc_max_score', 7.0) if getattr(exam, 'mc_max_score', None) is not None else 7.0,
-        "essay_max_score": getattr(exam, 'essay_max_score', 3.0) if getattr(exam, 'essay_max_score', None) is not None else 3.0
-    }
-    candidate_info = {
-        "username": student.username if student else "unknown",
-        "fullname": student.fullname if student else "Thí sinh",
-        "dob": getattr(student, 'dob', None) or "-",
-        "class_name": getattr(student, 'class_name', None) or "-",
-        "score": res.score,
-        "max_score": res.max_score or 10.0,
-        "correct_count": res.correct_count or 0,
-        "total_questions": res.total_questions or len(audit_questions),
-        "duration_str": dur_str,
-        "start_time_str": start_str,
-        "submit_time_str": submit_str,
-        "status_text": status_text
-    }
-
-    excel_bytes = generate_candidate_excel(exam_info, candidate_info, audit_questions)
-    safe_name = sanitize_filename(f"BaiThi_{candidate_info['username']}_{candidate_info['fullname']}")
+    excel_bytes = generate_candidate_audit_excel(res, exam, student, db)
+    uname = student.username if student else f"user_{res.user_id}"
+    fname = student.fullname if student else "thi_sinh"
+    safe_name = sanitize_filename(f"BaiThi_{uname}_{fname}")
     filename = f"{safe_name}.xlsx"
 
     return StreamingResponse(
