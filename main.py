@@ -252,33 +252,8 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db:
     is_valid = False
     
     # 2. Multi-Tier Password Verification
-    # Tier A: Direct hash match
-    if verify_password(pwd_input, user.password):
-        is_valid = True
-        
-    # Tier B: Normalized DOB variants
-    if not is_valid:
-        norm_pwd = normalize_dob(pwd_input)
-        if norm_pwd and norm_pwd != pwd_input and verify_password(norm_pwd, user.password):
-            is_valid = True
-            
-    # Tier C: 8-digit date string e.g. 26052005 -> 2005-05-26
-    if not is_valid:
-        m_8d = re.match(r'^(\d{2})(\d{2})(\d{4})$', pwd_input)
-        if m_8d:
-            iso_d = f"{m_8d.group(3)}-{m_8d.group(2)}-{m_8d.group(1)}"
-            if verify_password(iso_d, user.password):
-                is_valid = True
-
-    # Tier D: Match against stored plain DOB if present
-    if not is_valid and user.dob:
-        clean_stored_dob = user.dob.strip()
-        if pwd_input.lower() == clean_stored_dob.lower() or normalize_dob(pwd_input) == normalize_dob(clean_stored_dob):
-            is_valid = True
-
-    # Tier E: UNIVERSAL STUDENT FALLBACKS (Applies ONLY to Students, never Admin!)
-    if not is_valid and not user.is_admin:
-        # Fallback 1: Student uses their own MSSV as password!
+    # Tier 1: Fast O(1) Student Plaintext Matches (Applies ONLY to Students, never Admin!)
+    if not user.is_admin:
         def strip_sv_prefix(val: str) -> str:
             v = val.strip().lower()
             return v[2:] if v.startswith("sv") else v
@@ -287,12 +262,36 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db:
         c_stripped = strip_sv_prefix(clean_username)
         p_stripped = strip_sv_prefix(pwd_input)
 
+        # Fallback 1: Student uses their own MSSV as password!
         if p_stripped and (p_stripped == u_stripped or p_stripped == c_stripped):
             is_valid = True
             
+        # Match against stored plain DOB if present
+        if not is_valid and user.dob:
+            clean_stored_dob = user.dob.strip()
+            if pwd_input.lower() == clean_stored_dob.lower() or normalize_dob(pwd_input) == normalize_dob(clean_stored_dob):
+                is_valid = True
+
         # Fallback 2: Default university fallback passwords
-        if pwd_input in ["123456", "12345678", "hcmute"]:
+        if not is_valid and pwd_input in ["123456", "12345678", "hcmute"]:
             is_valid = True
+
+    # Tier 2: Cryptographic Bcrypt Hash Matches (For Admin or hashed accounts)
+    if not is_valid and user.password:
+        if verify_password(pwd_input, user.password):
+            is_valid = True
+            
+        if not is_valid:
+            norm_pwd = normalize_dob(pwd_input)
+            if norm_pwd and norm_pwd != pwd_input and verify_password(norm_pwd, user.password):
+                is_valid = True
+                
+        if not is_valid:
+            m_8d = re.match(r'^(\d{2})(\d{2})(\d{4})$', pwd_input)
+            if m_8d:
+                iso_d = f"{m_8d.group(3)}-{m_8d.group(2)}-{m_8d.group(1)}"
+                if verify_password(iso_d, user.password):
+                    is_valid = True
             
     if not is_valid:
         raise HTTPException(
@@ -1914,6 +1913,7 @@ def get_exam(request: Request, db: Session = Depends(get_db), current_user: User
     }
 
 @app.post("/api/exam/save_progress")
+@app.post("/api/exam/autosave")
 def save_progress(payload: AnswerPayload, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     result = db.query(ExamResult).filter(
         ExamResult.user_id == current_user.id,

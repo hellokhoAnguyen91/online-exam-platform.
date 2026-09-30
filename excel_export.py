@@ -133,7 +133,7 @@ def generate_candidate_excel(
 
     # 1. Title Banner
     ws.merge_cells("A1:F1")
-    ws["A1"] = "TRƯỜNG ĐH SƯ PHẠM KỸ THUẬT TP.HCM — KHOA ĐÀO TẠO & KHẢO THÍ"
+    ws["A1"] = "TRƯỜNG ĐẠI HỌC CÔNG NGHỆ KỸ THUẬT TP. HỒ CHÍ MINH (HCMUTE)"
     ws["A1"].font = font_org
     ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
 

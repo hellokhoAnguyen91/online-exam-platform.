@@ -266,7 +266,7 @@ def generate_candidate_pdf(exam_info: Dict[str, Any], candidate_info: Dict[str, 
 
     # 1. Header Table (Left: Institution, Right: Country/Exam metadata)
     left_cell = [
-        Paragraph("<b>TRƯỜNG ĐẠI HỌC SƯ PHẠM KỸ THUẬT TP.HCM</b>", style_univ),
+        Paragraph("<b>TRƯỜNG ĐẠI HỌC CÔNG NGHỆ KỸ THUẬT TP. HỒ CHÍ MINH (HCMUTE)</b>", style_univ),
         Paragraph("HỆ THỐNG THI TRẮC NGHIỆM TRỰC TUYẾN", style_sub),
         Paragraph(f"Khoa / Bộ môn Đào tạo phụ trách", style_sub)
     ]
