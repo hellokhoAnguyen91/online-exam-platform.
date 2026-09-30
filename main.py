@@ -1621,6 +1621,8 @@ def export_results_pdf_zip(
         raise HTTPException(status_code=400, detail="Kỳ thi này hiện chưa có bài thi nào được nộp để xuất file PDF.")
 
     zip_bytes, exported_count = generate_batch_exam_zip(target_exam, results, db)
+    if exported_count == 0:
+        raise HTTPException(status_code=500, detail="Không thể tạo file PDF bài thi nào cho thí sinh. Vui lòng kiểm tra định dạng dữ liệu.")
     safe_title = sanitize_filename(target_exam.title)
     now_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"Bai_thi_PDF_{safe_title}_{now_str}.zip"

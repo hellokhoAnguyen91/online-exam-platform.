@@ -30,20 +30,86 @@ def ensure_fonts():
     if FONTS_REGISTERED:
         return
     
-    font_dir = "C:/Windows/Fonts"
-    arial = os.path.join(font_dir, "arial.ttf")
-    arial_bd = os.path.join(font_dir, "arialbd.ttf")
-    arial_it = os.path.join(font_dir, "ariali.ttf")
-    arial_bi = os.path.join(font_dir, "arialbi.ttf")
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    candidate_dirs = [
+        os.path.join(base_dir, "fonts"),
+        "C:/Windows/Fonts",
+        "/usr/share/fonts/truetype/dejavu",
+        "/usr/share/fonts/truetype/liberation",
+        "/usr/share/fonts/truetype",
+        "/usr/share/fonts",
+        "/System/Library/Fonts"
+    ]
+    
+    arial = None
+    arial_bd = None
+    arial_it = None
+    arial_bi = None
 
-    if os.path.exists(arial):
-        pdfmetrics.registerFont(TTFont("Arial", arial))
-    if os.path.exists(arial_bd):
-        pdfmetrics.registerFont(TTFont("Arial-Bold", arial_bd))
-    if os.path.exists(arial_it):
-        pdfmetrics.registerFont(TTFont("Arial-Italic", arial_it))
-    if os.path.exists(arial_bi):
-        pdfmetrics.registerFont(TTFont("Arial-BoldItalic", arial_bi))
+    for d in candidate_dirs:
+        if not os.path.isdir(d):
+            continue
+        p = os.path.join(d, "arial.ttf")
+        if not arial and os.path.exists(p):
+            arial = p
+        p_bd = os.path.join(d, "arialbd.ttf")
+        if not arial_bd and os.path.exists(p_bd):
+            arial_bd = p_bd
+        p_it = os.path.join(d, "ariali.ttf")
+        if not arial_it and os.path.exists(p_it):
+            arial_it = p_it
+        p_bi = os.path.join(d, "arialbi.ttf")
+        if not arial_bi and os.path.exists(p_bi):
+            arial_bi = p_bi
+        
+        # Check Linux DejaVu fallback if Arial not found
+        if not arial:
+            dj = os.path.join(d, "DejaVuSans.ttf")
+            if os.path.exists(dj):
+                arial = dj
+        if not arial_bd:
+            dj_bd = os.path.join(d, "DejaVuSans-Bold.ttf")
+            if os.path.exists(dj_bd):
+                arial_bd = dj_bd
+
+    if arial:
+        try:
+            pdfmetrics.registerFont(TTFont("Arial", arial))
+        except Exception as e:
+            print(f"[PDF] Font registration warning for Arial: {e}")
+
+    if arial_bd:
+        try:
+            pdfmetrics.registerFont(TTFont("Arial-Bold", arial_bd))
+        except Exception as e:
+            print(f"[PDF] Font registration warning for Arial-Bold: {e}")
+    elif arial:
+        try:
+            pdfmetrics.registerFont(TTFont("Arial-Bold", arial))
+        except Exception:
+            pass
+
+    if arial_it:
+        try:
+            pdfmetrics.registerFont(TTFont("Arial-Italic", arial_it))
+        except Exception as e:
+            print(f"[PDF] Font registration warning for Arial-Italic: {e}")
+    elif arial:
+        try:
+            pdfmetrics.registerFont(TTFont("Arial-Italic", arial))
+        except Exception:
+            pass
+
+    if arial_bi:
+        try:
+            pdfmetrics.registerFont(TTFont("Arial-BoldItalic", arial_bi))
+        except Exception as e:
+            print(f"[PDF] Font registration warning for Arial-BoldItalic: {e}")
+    elif arial:
+        try:
+            pdfmetrics.registerFont(TTFont("Arial-BoldItalic", arial))
+        except Exception:
+            pass
 
     FONTS_REGISTERED = True
 
@@ -814,6 +880,9 @@ def generate_batch_exam_zip(exam: Any, results: List[Any], db: Any) -> Tuple[byt
                 print(f"[PDF] Error generating PDF for candidate {username}: {e}")
                 import traceback
                 traceback.print_exc()
+
+    if exported_count == 0 and results:
+        raise RuntimeError("Không thể tạo file PDF bài thi nào cho thí sinh. Vui lòng kiểm tra phông chữ và dữ liệu bài thi.")
 
     zip_bytes = zip_buffer.getvalue()
     return zip_bytes, exported_count

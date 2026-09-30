@@ -3749,6 +3749,9 @@
                 throw new Error(err.detail || `Lỗi tải file nén (${res.status})`);
             }
             const blob = await res.blob();
+            if(blob.size < 100) {
+                throw new Error("Gói nén ZIP tải về bị rỗng (0 bytes)! Vui lòng kiểm tra lại ca thi.");
+            }
             const dlUrl = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.style.display = 'none';
