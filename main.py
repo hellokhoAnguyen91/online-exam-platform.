@@ -1617,6 +1617,8 @@ def export_results_pdf_zip(
             query = query.filter(ExamResult.start_time >= s_dt, ExamResult.start_time <= e_dt)
 
     results = query.order_by(ExamResult.id.asc()).all()
+    if not results:
+        raise HTTPException(status_code=400, detail="Kỳ thi này hiện chưa có bài thi nào được nộp để xuất file PDF.")
 
     zip_bytes, exported_count = generate_batch_exam_zip(target_exam, results, db)
     safe_title = sanitize_filename(target_exam.title)

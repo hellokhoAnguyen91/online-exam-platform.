@@ -719,14 +719,6 @@ def generate_batch_exam_zip(exam: Any, results: List[Any], db: Any) -> Tuple[byt
     }
 
     with zipfile.ZipFile(zip_buffer, 'w', compression=zipfile.ZIP_DEFLATED) as zip_file:
-        # Generate companion Excel Class Summary Sheet
-        try:
-            from excel_export import generate_class_summary_excel
-            excel_bytes = generate_class_summary_excel(exam, results, db)
-            zip_file.writestr("00_Bang_Diem_Tong_Hop_Ca_Lop.xlsx", excel_bytes)
-        except Exception as e:
-            print(f"[PDF-ZIP] Note: could not attach companion Excel summary: {e}")
-
         if not results:
             return zip_buffer.getvalue(), 0
 

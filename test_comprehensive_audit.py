@@ -56,8 +56,11 @@ def test_audit_suite():
                 is_admin=False
             )
             db.add(mssv_stu)
-            db.commit()
             db.refresh(mssv_stu)
+
+        # Clear any prior results for test student to ensure clean state
+        db.query(ExamResult).filter(ExamResult.user_id == mssv_stu.id).delete()
+        db.commit()
 
         # Login using MSSV as password
         stu_login = client.post("/token", data={"username": "21110099", "password": "21110099"})
@@ -140,7 +143,6 @@ def test_audit_suite():
         print("  ✓ Questions including options A-F, multi_select, essay created")
 
         # 4. Student takes exam:
-        # Fetch exam
         take_res = client.get("/api/exam", headers=stu_headers)
         assert take_res.status_code == 200, f"Get exam failed: {take_res.text}"
         data = take_res.json()
@@ -278,7 +280,7 @@ def test_audit_suite():
         assert exported_count == 1
         with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
             namelist = zf.namelist()
-            assert "00_Bang_Diem_Tong_Hop_Ca_Lop.xlsx" in namelist
+            assert all(n.endswith(".pdf") for n in namelist), "PDF ZIP must contain only .pdf files!"
             assert any(n.endswith(".pdf") for n in namelist)
         print(f"  ✓ Batch ZIP export generated successfully ({len(zip_bytes)} bytes)")
 
@@ -294,6 +296,17 @@ def test_audit_suite():
         print("\n🎉 ALL AUDIT REQUIREMENTS FULLY PASSED AND VERIFIED 100%!")
 
     finally:
+        # Clean up test exam and reactivate Exam 123
+        try:
+            db.query(ExamResult).filter(ExamResult.exam_id == exam_id).delete()
+            db.query(Question).filter(Question.exam_id == exam_id).delete()
+            db.query(Exam).filter(Exam.id == exam_id).delete()
+            ex123 = db.query(Exam).filter(Exam.id == 123).first()
+            if ex123:
+                ex123.is_active = True
+            db.commit()
+        except Exception:
+            pass
         db.close()
 
 if __name__ == "__main__":
