@@ -124,6 +124,13 @@ class TestStudentParser(unittest.TestCase):
         self.assertEqual(res["students"][0]["mssv"], "01234567")
         self.assertEqual(res["students"][0]["fullname"], "Lê Văn Cường")
 
+    def test_empty_or_invalid_dob(self):
+        # Empty DOB or invalid format should NOT be filled with 2003-01-01
+        csv_data = "MSSV,Họ và tên,Ngày sinh\n21110001,Trần Văn An,\n21110002,Lê Thị Bình,invalid_date\n"
+        res = parse_student_file(csv_data.encode("utf-8-sig"), "students_empty_dob.csv")
+        self.assertEqual(res["students"][0]["dob"], "")
+        self.assertEqual(res["students"][1]["dob"], "")
+
 if __name__ == "__main__":
     unittest.main()
 

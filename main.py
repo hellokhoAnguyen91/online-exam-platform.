@@ -30,7 +30,7 @@ from student_parser import parse_student_file
 from pdf_export import generate_batch_exam_zip, generate_candidate_pdf, sanitize_filename
 from excel_export import generate_candidate_excel, generate_batch_excel_zip, generate_candidate_audit_excel
 
-SECRET_KEY = "super-secret-key-for-exam-platform-change-in-production"
+SECRET_KEY = os.environ.get("SECRET_KEY", "hcmute-exam-secure-key-2026-prod-jwt")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 240
 
@@ -43,7 +43,7 @@ app = FastAPI(title="Hệ thống Thi Trắc nghiệm Trực tuyến Chuyên ngh
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -272,10 +272,6 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db:
             if pwd_input.lower() == clean_stored_dob.lower() or normalize_dob(pwd_input) == normalize_dob(clean_stored_dob):
                 is_valid = True
 
-        # Fallback 2: Default university fallback passwords
-        if not is_valid and pwd_input in ["123456", "12345678", "hcmute"]:
-            is_valid = True
-
     # Tier 2: Cryptographic Bcrypt Hash Matches (For Admin or hashed accounts)
     if not is_valid and user.password:
         if verify_password(pwd_input, user.password):
@@ -296,7 +292,7 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db:
     if not is_valid:
         raise HTTPException(
             status_code=401, 
-            detail="Mật khẩu (Ngày sinh) không chính xác! Bạn có thể nhập ngày sinh dạng DD/MM/YYYY (vd: 26/05/2005), hoặc nhập chính Mã số sinh viên của bạn (hoặc 123456) làm mật khẩu."
+            detail="Mật khẩu (Ngày sinh) không chính xác! Bạn có thể nhập ngày sinh dạng DD/MM/YYYY (vd: 26/05/2005), hoặc nhập chính Mã số sinh viên của bạn làm mật khẩu."
         )
     
     access_token = create_access_token(data={"sub": user.username})
@@ -488,6 +484,10 @@ def export_exam_backup(exam_id: int, db: Session = Depends(get_db), current_user
         "option_b": q.option_b,
         "option_c": q.option_c,
         "option_d": q.option_d,
+        "option_e": getattr(q, 'option_e', '') or '',
+        "option_f": getattr(q, 'option_f', '') or '',
+        "question_type": getattr(q, 'question_type', 'multiple_choice') or 'multiple_choice',
+        "score_weight": getattr(q, 'score_weight', 1.0) if getattr(q, 'score_weight', None) is not None else 1.0,
         "correct_option": q.correct_option,
         "explanation": q.explanation
     } for q in questions]
@@ -573,6 +573,10 @@ async def restore_exam_backup(file: UploadFile = File(...), db: Session = Depend
                 option_b=q.get("option_b", ""),
                 option_c=q.get("option_c", ""),
                 option_d=q.get("option_d", ""),
+                option_e=q.get("option_e", ""),
+                option_f=q.get("option_f", ""),
+                question_type=q.get("question_type", "multiple_choice") or "multiple_choice",
+                score_weight=q.get("score_weight", 1.0) if q.get("score_weight") is not None else 1.0,
                 correct_option=q.get("correct_option", "A"),
                 explanation=q.get("explanation")
             ))
@@ -858,18 +862,19 @@ async def upload_students(file: UploadFile = File(...), db: Session = Depends(ge
     for idx, s in enumerate(students):
         raw_mssv = s["mssv"]
         raw_name = s["fullname"]
-        raw_dob = s["dob"]
+        raw_dob = s.get("dob") or ""
         raw_class = s.get("class_name", "")
         raw_order = s.get("order_index", idx + 1)
         
+        pwd_val = raw_dob.strip() if (raw_dob and raw_dob.strip()) else raw_mssv
         user = db.query(User).filter(User.username == raw_mssv).first()
         if not user:
             user = User(
                 username=raw_mssv,
-                password=get_password_hash(raw_dob),
+                password=get_password_hash(pwd_val),
                 is_admin=False,
                 fullname=raw_name,
-                dob=raw_dob,
+                dob=raw_dob if raw_dob else None,
                 class_name=raw_class,
                 order_index=raw_order
             )
@@ -877,9 +882,9 @@ async def upload_students(file: UploadFile = File(...), db: Session = Depends(ge
             new_count += 1
         else:
             if not user.is_admin:
-                user.password = get_password_hash(raw_dob)
+                user.password = get_password_hash(pwd_val)
                 user.fullname = raw_name
-                user.dob = raw_dob
+                user.dob = raw_dob if raw_dob else None
                 user.class_name = raw_class
                 user.order_index = raw_order
                 updated_count += 1
@@ -1315,11 +1320,11 @@ def auto_close_exam_result(result: ExamResult, db: Session, exam: Optional[Exam]
     return result
 
 def sync_expired_sessions(db: Session, exam_id: Optional[int] = None):
-    """Scan and automatically finalize any student session that has exceeded exam duration,
-    and enforce that no session exceeds the maximum exam duration.
+    """Scan and automatically finalize any student session that has exceeded exam duration.
+    Only processes in-progress sessions; does not modify already-submitted sessions.
     """
     now = datetime.datetime.now()
-    # 1. Auto-close in-progress sessions that have timed out
+    # Auto-close in-progress sessions that have timed out
     query = db.query(ExamResult).filter(ExamResult.status == "in_progress")
     if exam_id:
         query = query.filter(ExamResult.exam_id == exam_id)
@@ -1334,21 +1339,6 @@ def sync_expired_sessions(db: Session, exam_id: Optional[int] = None):
             elapsed = (now - r.start_time).total_seconds()
             if elapsed >= duration_sec:
                 auto_close_exam_result(r, db, exam)
-
-    # 2. Strict guarantee: Cap any existing or past sessions to maximum exam duration
-    sub_query = db.query(ExamResult).filter(ExamResult.status == "submitted")
-    if exam_id:
-        sub_query = sub_query.filter(ExamResult.exam_id == exam_id)
-    for r in sub_query.all():
-        exam = db.query(Exam).filter(Exam.id == r.exam_id).first()
-        if not exam:
-            continue
-        max_sec = exam.duration_minutes * 60
-        if r.duration_seconds and r.duration_seconds > max_sec:
-            r.duration_seconds = max_sec
-            if r.start_time:
-                r.submit_time = r.start_time + datetime.timedelta(seconds=max_sec)
-            db.commit()
 
 @app.get("/api/admin/results")
 def get_results(exam_id: Optional[int] = None, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
@@ -2153,7 +2143,10 @@ def review_my_exam(db: Session = Depends(get_db), current_user: User = Depends(g
         
     now = datetime.datetime.now()
     close_dt = exam.close_time.replace(tzinfo=None) if (exam.close_time and exam.close_time.tzinfo) else exam.close_time
-    is_closed = (close_dt is None or now > close_dt)
+    if close_dt is not None:
+        is_closed = (now > close_dt)
+    else:
+        is_closed = not bool(exam.is_active)
     can_show_answers = bool(exam.allow_review) and is_closed
 
     audit_questions = []
@@ -2241,8 +2234,11 @@ def review_my_exam(db: Session = Depends(get_db), current_user: User = Depends(g
     }
 
 @app.api_route("/api/exams", methods=["GET", "HEAD"])
-def get_public_exams(db: Session = Depends(get_db)):
-    exams = db.query(Exam).filter(Exam.is_archived == False).all()
+def get_public_exams(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    query = db.query(Exam).filter(Exam.is_archived == False)
+    if not current_user.is_admin:
+        query = query.filter(Exam.is_active == True)
+    exams = query.all()
     return [{
         "id": ex.id,
         "title": ex.title,
@@ -2309,7 +2305,7 @@ async def start_background_session_scanner():
                     db.close()
             except Exception:
                 pass
-            await asyncio.sleep(5)
+            await asyncio.sleep(20)
             
     asyncio.create_task(session_scanner())
 

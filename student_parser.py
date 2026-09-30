@@ -39,16 +39,17 @@ def clean_cell_text(val: Any) -> str:
             s = s[:-2]
     return s
 
-def parse_vietnamese_date(val: Any) -> str:
+def parse_vietnamese_date(val: Any) -> Optional[str]:
     """
     Normalizes diverse date inputs into 'YYYY-MM-DD'.
     Handles:
       - pd.Timestamp, datetime.date, datetime.datetime
       - Excel serial numbers (e.g. 37636 -> 2003-01-15)
       - Strings: DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY, YYYY-MM-DD, D/M/YYYY
+    Returns None if missing, blank, or invalid.
     """
     if val is None or pd.isna(val):
-        return "2003-01-01"
+        return None
         
     if isinstance(val, (datetime.datetime, datetime.date, pd.Timestamp)):
         return val.strftime("%Y-%m-%d")
@@ -66,8 +67,8 @@ def parse_vietnamese_date(val: Any) -> str:
         pass
         
     s = str(val).strip()
-    if not s or s.lower() == "nan":
-        return "2003-01-01"
+    if not s or s.lower() in ("nan", "none", "null"):
+        return None
         
     # Replace separators
     s_clean = s.replace(".", "/").replace("-", "/").replace(" ", "")
@@ -108,7 +109,7 @@ def parse_vietnamese_date(val: Any) -> str:
     if re.match(r"^\d{4}$", s):
         return f"{s}-01-01"
         
-    return s
+    return None
 
 def identify_columns(headers: List[str]) -> Tuple[Optional[int], Optional[int], Optional[int], Optional[int], Optional[int], Optional[int], List[str]]:
     """
@@ -444,10 +445,11 @@ def parse_student_data_matrix(matrix: List[List[Any]], header_row_idx: int, head
         # Parse DOB
         dob_val = ""
         if dob_idx is not None and dob_idx < len(row):
-            dob_val = parse_vietnamese_date(row[dob_idx])
+            parsed_d = parse_vietnamese_date(row[dob_idx])
+            dob_val = parsed_d if parsed_d else ""
         else:
-            # Default password/DOB if column completely missing
-            dob_val = "2003-01-01"
+            # Leave empty so student uses MSSV as default password
+            dob_val = ""
 
         # Parse Class Name
         class_name = ""

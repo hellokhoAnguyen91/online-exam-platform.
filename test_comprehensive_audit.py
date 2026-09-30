@@ -69,6 +69,20 @@ def test_audit_suite():
         stu_headers = {"Authorization": f"Bearer {stu_token}"}
         print("  ✓ Student login with MSSV as password verified")
 
+        # Test Default passwords (123456, 12345678, hcmute) must be rejected with 401
+        for bad_pwd in ["123456", "12345678", "hcmute"]:
+            bad_login = client.post("/token", data={"username": "21110099", "password": bad_pwd})
+            assert bad_login.status_code == 401, f"Default password '{bad_pwd}' was accepted, should be 401!"
+        print("  ✓ Default fallback passwords (123456, 12345678, hcmute) successfully blocked (401)")
+
+        # Test /api/exams requires authentication and filters inactive exams
+        no_auth_exams = client.get("/api/exams")
+        assert no_auth_exams.status_code == 401, f"Expected 401 for unauthenticated /api/exams, got {no_auth_exams.status_code}"
+        stu_exams_res = client.get("/api/exams", headers=stu_headers)
+        assert stu_exams_res.status_code == 200
+        assert all(e["is_active"] for e in stu_exams_res.json()), "Student should only see active exams"
+        print("  ✓ /api/exams security (auth required & active-only for student) verified")
+
         # 3. Create a dedicated Audit Exam
         now = datetime.datetime.now()
         open_time = (now - datetime.timedelta(minutes=10)).isoformat()
@@ -248,6 +262,68 @@ def test_audit_suite():
         rq1 = next(q for q in rev_data2["questions"] if q["id"] == q1.id)
         assert rq1["correct"] == "A,C,E", f"Expected 'A,C,E', got {rq1['correct']}"
         print("  ✓ Review unmasking verified: correct answers visible after exam close_time")
+
+        # Test Review Masking when close_time is None:
+        # If exam is still active, answers MUST be masked
+        exam_obj.close_time = None
+        exam_obj.is_active = True
+        db.commit()
+        review_res_none_active = client.get("/api/exam/review", headers=stu_headers)
+        assert review_res_none_active.status_code == 200
+        for rq in review_res_none_active.json()["questions"]:
+            assert rq["correct"] is None, "Answers leaked when close_time is None and exam is active!"
+        print("  ✓ Review masking verified: correct answers hidden when close_time is None and exam is active")
+
+        # When deactivated (not active), answers should be unmasked
+        exam_obj.is_active = False
+        db.commit()
+        review_res_none_inactive = client.get("/api/exam/review", headers=stu_headers)
+        assert review_res_none_inactive.status_code == 200
+        rq1_none = next(q for q in review_res_none_inactive.json()["questions"] if q["id"] == q1.id)
+        assert rq1_none["correct"] == "A,C,E"
+        print("  ✓ Review unmasking verified: correct answers visible when close_time is None and exam is inactive")
+
+        # Restore exam_obj state for remaining tests
+        exam_obj.close_time = now - datetime.timedelta(minutes=5)
+        exam_obj.is_active = True
+        db.commit()
+
+        # Test sync_expired_sessions does NOT alter submitted session duration or submit_time
+        from main import sync_expired_sessions
+        res_submitted = db.query(ExamResult).filter(ExamResult.user_id == mssv_stu.id, ExamResult.exam_id == exam_id).first()
+        assert res_submitted is not None
+        test_duration = 7200
+        test_submit = datetime.datetime(2026, 1, 1, 12, 0, 0)
+        res_submitted.duration_seconds = test_duration
+        res_submitted.submit_time = test_submit
+        db.commit()
+
+        sync_expired_sessions(db, exam_id)
+        db.refresh(res_submitted)
+        assert res_submitted.duration_seconds == test_duration, "sync_expired_sessions illegally capped submitted duration!"
+        assert res_submitted.submit_time == test_submit, "sync_expired_sessions illegally modified submitted submit_time!"
+        print("  ✓ Data preservation verified: sync_expired_sessions does NOT modify submitted sessions")
+
+        # Test Backup & Restore preserves question_type, score_weight, option_e, option_f
+        backup_res = client.get(f"/api/admin/exams/{exam_id}/backup", headers=admin_headers)
+        assert backup_res.status_code == 200
+        backup_json = backup_res.json()
+        assert any(q.get("question_type") == "multi_select" and q.get("option_e") for q in backup_json["questions"])
+        assert any(q.get("question_type") == "essay" and q.get("score_weight") == 2.0 for q in backup_json["questions"])
+
+        restore_payload = io.BytesIO(json.dumps(backup_json).encode("utf-8"))
+        restore_res = client.post("/api/admin/exams/restore", files={"file": ("backup.json", restore_payload, "application/json")}, headers=admin_headers)
+        assert restore_res.status_code == 200
+        restored_exam_id = restore_res.json()["exam_id"]
+        restored_qs = db.query(Question).filter(Question.exam_id == restored_exam_id).all()
+        assert len(restored_qs) == 4
+        rq1_restored = next(q for q in restored_qs if q.question_type == "multi_select")
+        assert rq1_restored.option_e == "E đúng"
+        assert rq1_restored.score_weight == 3.0
+        db.query(Question).filter(Question.exam_id == restored_exam_id).delete()
+        db.query(Exam).filter(Exam.id == restored_exam_id).delete()
+        db.commit()
+        print("  ✓ Backup & Restore preserves question_type, score_weight, option_e, option_f verified")
 
         # 7. Test PDF Generation with Options A-F and Multi-Select & Essay
         cand_info = {
