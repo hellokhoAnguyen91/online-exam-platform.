@@ -308,6 +308,20 @@ def main():
     log(f"    - Công thức đếm số câu đúng (Cột E): '{countif_cell_val}'")
     log(f"    - Công thức tính tổng điểm tự động (Cột F): '{total_cell_val}'")
 
+    # Verify PDF ZIP export
+    log("\n[Bước 6b/6] Kiểm tra xuất trọn bộ gói Bài thi PDF (.ZIP)...")
+    pdf_zip_res = requests.get(f"{BASE_URL}/api/admin/results/export_pdf_zip?exam_id={test_exam_id}", headers=admin_headers)
+    if pdf_zip_res.status_code == 200:
+        pdf_zf = zipfile.ZipFile(io.BytesIO(pdf_zip_res.content))
+        pdf_entries = pdf_zf.namelist()
+        log(f"✓ Gói PDF ZIP tải về thành công! Tổng số file bên trong: {len(pdf_entries)}")
+        pdf_files = [f for f in pdf_entries if f.endswith(".pdf")]
+        log(f"  + Số lượng bài thi PDF thí sinh: {len(pdf_files)} / {NUM_STUDENTS} file PDF")
+        has_pdf_summary = "00_Bang_Diem_Tong_Hop_Ca_Lop.xlsx" in pdf_entries
+        log(f"  + File bảng điểm tổng hợp kèm theo: {'Có mặt' if has_pdf_summary else 'Thiếu'}")
+    else:
+        log(f"⚠️ Lỗi tải gói PDF ZIP: {pdf_zip_res.status_code}")
+
     # -------------------------------------------------------------
     # 7. PERFORMANCE & READINESS REPORT
     # -------------------------------------------------------------
