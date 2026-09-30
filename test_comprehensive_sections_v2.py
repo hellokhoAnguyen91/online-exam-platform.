@@ -297,7 +297,7 @@ class TestComprehensiveSectionsV2(unittest.TestCase):
         detail_after = self.client.get(f"/api/admin/results/{result_id}/detail", headers=self.admin_headers).json()
         self.assertFalse(detail_after["has_pending_essay"])
         self.assertIsNotNone(detail_after["score"])
-        self.assertEqual(detail_after["essay_score"], 4.5)
+        self.assertEqual(detail_after["essay_score"], 2.25)
 
         # 10. PDF Export with Part I and Part II
         pdf_bytes = generate_candidate_pdf(

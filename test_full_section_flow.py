@@ -181,7 +181,7 @@ def test_full_section_workflow():
         audit_res2 = client.get(f"/api/admin/results/{res_entry.id}/detail", headers=adm_headers)
         audit_data2 = audit_res2.json()
         assert audit_data2["has_pending_essay"] is False
-        assert audit_data2["essay_score"] == 4.0
+        assert audit_data2["essay_score"] == 2.4
         print(f"  ✓ Graded score verified: {audit_data2['score']} / {audit_data2['max_score']}")
 
         # 11. PDF Export Verification

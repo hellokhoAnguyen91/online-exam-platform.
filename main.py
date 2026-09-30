@@ -522,7 +522,10 @@ def export_exam_backup(exam_id: int, db: Session = Depends(get_db), current_user
             "open_time": exam.open_time.isoformat() if exam.open_time else None,
             "close_time": exam.close_time.isoformat() if exam.close_time else None,
             "allow_review": exam.allow_review,
-            "shuffle_questions": exam.shuffle_questions
+            "shuffle_questions": exam.shuffle_questions,
+            "shuffle_options": getattr(exam, 'shuffle_options', False),
+            "mc_max_score": getattr(exam, 'mc_max_score', 7.0),
+            "essay_max_score": getattr(exam, 'essay_max_score', 3.0)
         },
         "questions": q_data,
         "results": r_data
@@ -556,6 +559,9 @@ async def restore_exam_backup(file: UploadFile = File(...), db: Session = Depend
             close_time=parse_iso_dt(exam_info.get("close_time")),
             allow_review=exam_info.get("allow_review", True),
             shuffle_questions=exam_info.get("shuffle_questions", True),
+            shuffle_options=exam_info.get("shuffle_options", False),
+            mc_max_score=exam_info.get("mc_max_score", 7.0),
+            essay_max_score=exam_info.get("essay_max_score", 3.0),
             is_active=False,
             is_archived=True,
             archived_at=datetime.datetime.now()
@@ -915,9 +921,11 @@ def create_student_manual(payload: StudentCreate, db: Session = Depends(get_db),
         raise HTTPException(status_code=400, detail="Họ và tên không được để trống")
     dob_raw = (payload.dob or "").strip()
     if not dob_raw:
-        dob_norm = mssv
+        dob_norm = None
+        pwd_val = mssv
     else:
         dob_norm = normalize_dob(dob_raw)
+        pwd_val = dob_norm
 
     existing = db.query(User).filter(User.username == mssv).first()
     if existing:
@@ -925,7 +933,7 @@ def create_student_manual(payload: StudentCreate, db: Session = Depends(get_db),
 
     new_user = User(
         username=mssv,
-        password=get_password_hash(dob_norm),
+        password=get_password_hash(pwd_val),
         is_admin=False,
         fullname=fullname,
         dob=dob_norm,
@@ -940,7 +948,7 @@ def create_student_manual(payload: StudentCreate, db: Session = Depends(get_db),
             "id": new_user.id,
             "username": new_user.username,
             "fullname": new_user.fullname,
-            "dob": dob_norm,
+            "dob": new_user.dob or "",
             "class_name": new_user.class_name or ""
         }
     }
@@ -1116,19 +1124,33 @@ def calculate_exam_score(audit_details: list, q_dict: dict, exam: Optional[Exam]
     sum_essay_weights = sum(float(q_dict[d["id"]].score_weight or 1.0) for d in essay_items)
     essay_scale = (eff_essay_max / sum_essay_weights) if sum_essay_weights > 0 else 0.0
 
+    has_pending = False
     mc_earned = 0.0
     correct_count = 0
     for d in mc_items:
-        raw_earned = float(d.get("earned_score", 0.0) if d.get("earned_score") is not None else ((q_dict[d["id"]].score_weight or 1.0) if d.get("is_correct") else 0.0))
-        item_pts = round(raw_earned * mc_scale, 2)
-        d["earned_score"] = raw_earned
-        d["points"] = item_pts
-        d["score_weight"] = round(float(q_dict[d["id"]].score_weight or 1.0) * mc_scale, 2)
-        mc_earned += item_pts
-        if d.get("is_correct") or d.get("status") == "correct":
-            correct_count += 1
-
-    has_pending = False
+        q_obj = q_dict.get(d.get("id"))
+        weight = float(q_obj.score_weight or 1.0) if q_obj else 1.0
+        d["score_weight"] = round(weight * mc_scale, 2)
+        
+        if d.get("status") == "pending_grading":
+            has_pending = True
+            d["points"] = 0.0
+        elif d.get("status") == "graded" and "essay_score" in d and d["essay_score"] is not None:
+            raw_sc = float(d["essay_score"])
+            item_pts = round(raw_sc * mc_scale, 2)
+            d["earned_score"] = raw_sc
+            d["points"] = item_pts
+            mc_earned += item_pts
+            if raw_sc > 0:
+                correct_count += 1
+        else:
+            raw_earned = float(d.get("earned_score", 0.0) if d.get("earned_score") is not None else (weight if d.get("is_correct") else 0.0))
+            item_pts = round(raw_earned * mc_scale, 2)
+            d["earned_score"] = raw_earned
+            d["points"] = item_pts
+            mc_earned += item_pts
+            if d.get("is_correct") or d.get("status") == "correct":
+                correct_count += 1
     essay_earned = 0.0
     for d in essay_items:
         q_obj = q_dict.get(d["id"])
@@ -2198,6 +2220,7 @@ def review_my_exam(db: Session = Depends(get_db), current_user: User = Depends(g
             item_copy["is_correct"] = None
             item_copy["status"] = "hidden"
             item_copy["earned_score"] = None
+            item_copy["explanation"] = None
         safe_audit_questions.append(item_copy)
 
     mc_qs = [q for q in safe_audit_questions if q.get("question_type") != "essay"]
