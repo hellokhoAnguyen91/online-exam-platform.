@@ -111,15 +111,16 @@ def parse_vietnamese_date(val: Any) -> Optional[str]:
         
     return None
 
-def identify_columns(headers: List[str]) -> Tuple[Optional[int], Optional[int], Optional[int], Optional[int], Optional[int], Optional[int], List[str]]:
+def identify_columns(headers: List[str], matrix: Optional[List[List[Any]]] = None, header_row_idx: int = 0) -> Tuple[Optional[int], Optional[int], Optional[int], Optional[int], Optional[int], Optional[int], Optional[int], List[str]]:
     """
     Identifies column indices for:
-      - mssv_idx: Student code
+      - mssv_idx: Student code (or email column containing student ID)
       - name_idx: Combined full name column
       - ho_idx: Split "Họ và tên đệm / Họ lót" column
       - ten_idx: Split "Tên" column
       - dob_idx: Date of birth / Password
       - class_idx: Class name
+      - stt_idx: Order index
       - ignored_headers: List of column names that are safely skipped
     """
     mssv_idx = None
@@ -128,6 +129,8 @@ def identify_columns(headers: List[str]) -> Tuple[Optional[int], Optional[int], 
     ten_idx = None
     dob_idx = None
     class_idx = None
+    stt_idx = None
+    email_idx = None
     ignored_headers = []
     
     # Priority keyword patterns
@@ -161,6 +164,11 @@ def identify_columns(headers: List[str]) -> Tuple[Optional[int], Optional[int], 
         "lop", "ten lop", "class", "class name", "class_name"
     ]
 
+    email_keywords = [
+        "email", "e-mail", "mail", "thu dien tu", "hop thu", "email sv", 
+        "email sinh vien", "tai khoan email", "dia chi email"
+    ]
+
     used_indices = set()
     
     # 1. Detect MSSV
@@ -180,7 +188,16 @@ def identify_columns(headers: List[str]) -> Tuple[Optional[int], Optional[int], 
                 used_indices.add(idx)
                 break
 
-    # 2. Detect DOB
+    # 2. Detect Email column (often contains student IDs at universities)
+    for idx, col in enumerate(headers):
+        if idx in used_indices:
+            continue
+        clean = remove_accents(col)
+        if any(kw == clean or f" {kw} " in f" {clean} " or clean.startswith(f"{kw} ") or clean.endswith(f" {kw}") for kw in email_keywords):
+            email_idx = idx
+            break
+
+    # 3. Detect DOB
     for idx, col in enumerate(headers):
         if idx in used_indices:
             continue
@@ -190,7 +207,7 @@ def identify_columns(headers: List[str]) -> Tuple[Optional[int], Optional[int], 
             used_indices.add(idx)
             break
 
-    # Detect Class
+    # 4. Detect Class
     for idx, col in enumerate(headers):
         if idx in used_indices:
             continue
@@ -200,10 +217,8 @@ def identify_columns(headers: List[str]) -> Tuple[Optional[int], Optional[int], 
             used_indices.add(idx)
             break
 
-    # 3. Detect Name (Single or Split)
+    # 5. Detect Name (Single or Split)
     # Check if a dedicated "Tên" column exists first!
-    # In Vietnamese student lists, if there is a separate "Tên" column,
-    # the name is ALWAYS split into (Họ lót / Họ và tên đệm) + (Tên).
     for idx, col in enumerate(headers):
         if idx in used_indices:
             continue
@@ -216,7 +231,6 @@ def identify_columns(headers: List[str]) -> Tuple[Optional[int], Optional[int], 
                 break
 
     if ten_idx is not None:
-        # We have a split name! Find the corresponding Họ / Họ lót column
         for idx, col in enumerate(headers):
             if idx in used_indices:
                 continue
@@ -281,8 +295,7 @@ def identify_columns(headers: List[str]) -> Tuple[Optional[int], Optional[int], 
                     used_indices.add(idx)
                     break
 
-    # Detect STT (Order index)
-    stt_idx = None
+    # 6. Detect STT (Order index)
     stt_keywords = ["stt", "tt", "so thu tu", "sothutu", "no", "order"]
     for idx, col in enumerate(headers):
         if idx in used_indices:
@@ -291,6 +304,65 @@ def identify_columns(headers: List[str]) -> Tuple[Optional[int], Optional[int], 
         if any(kw == clean or f" {kw} " in f" {clean} " or clean == kw for kw in stt_keywords):
             stt_idx = idx
             break
+
+    # 7. Fallback: If no MSSV column, but Email column exists, use Email column
+    if mssv_idx is None and email_idx is not None:
+        mssv_idx = email_idx
+        used_indices.add(email_idx)
+
+    # 8. Data-driven Heuristic: If MSSV is still None, inspect matrix data rows!
+    if mssv_idx is None and matrix is not None:
+        best_col = None
+        best_col_score = 0
+        scan_rows = matrix[header_row_idx + 1 : header_row_idx + 35]
+        num_cols = max(len(r) for r in scan_rows) if scan_rows else 0
+        
+        for c in range(num_cols):
+            if c in used_indices or c == stt_idx:
+                continue
+            col_vals = [str(r[c]).strip() for r in scan_rows if c < len(r) and pd.notna(r[c]) and str(r[c]).strip()]
+            if not col_vals:
+                continue
+            score = 0
+            for v in col_vals:
+                if re.match(r'^\d{6,10}$', v):
+                    score += 3
+                elif re.match(r'^(?:sv|SV)\d{6,10}$', v):
+                    score += 3
+                elif '@' in v and re.search(r'\d{5,}', v.split('@')[0]):
+                    score += 3
+                elif re.match(r'^\d{1,4}$', v):
+                    score -= 1
+            if score > best_col_score and score >= 3:
+                best_col_score = score
+                best_col = c
+                
+        if best_col is not None:
+            mssv_idx = best_col
+            used_indices.add(best_col)
+
+    # 9. Data-driven Heuristic for Full Name if still missing
+    if name_idx is None and ho_idx is None and ten_idx is None and matrix is not None:
+        best_name_col = None
+        best_name_score = 0
+        scan_rows = matrix[header_row_idx + 1 : header_row_idx + 35]
+        num_cols = max(len(r) for r in scan_rows) if scan_rows else 0
+        
+        for c in range(num_cols):
+            if c in used_indices or c == stt_idx:
+                continue
+            col_vals = [str(r[c]).strip() for r in scan_rows if c < len(r) and pd.notna(r[c]) and str(r[c]).strip()]
+            score = 0
+            for v in col_vals:
+                words = v.split()
+                if 2 <= len(words) <= 5 and not any(ch.isdigit() or ch == '@' for ch in v) and 5 <= len(v) <= 40:
+                    score += 2
+            if score > best_name_score and score >= 4:
+                best_name_score = score
+                best_name_col = c
+        if best_name_col is not None:
+            name_idx = best_name_col
+            used_indices.add(best_name_col)
 
     # Record all ignored columns
     for idx, col in enumerate(headers):
@@ -310,7 +382,8 @@ def find_header_row_in_matrix(matrix: List[List[Any]], max_scan_rows: int = 25) 
     
     score_keywords = [
         "mssv", "ma sv", "masv", "ma sinh vien", "so bao danh", "sbd", 
-        "ho ten", "ho va ten", "ten", "ho lot", "ngay sinh", "dob", "birth"
+        "ho ten", "ho va ten", "ten", "ho lot", "ngay sinh", "dob", "birth",
+        "email", "e-mail", "mail", "hop thu"
     ]
     
     limit = min(len(matrix), max_scan_rows)
@@ -325,13 +398,16 @@ def find_header_row_in_matrix(matrix: List[List[Any]], max_scan_rows: int = 25) 
                 if kw in text:
                     score += 2
                     
-        # Check if contains both MSSV and (Name or DOB)
+        # Check if contains both MSSV/Email and (Name or DOB)
         has_mssv = any("mssv" in remove_accents(str(c)) or "ma sv" in remove_accents(str(c)) or "masv" in remove_accents(str(c)) for c in row if c is not None)
+        has_email = any("email" in remove_accents(str(c)) or "mail" in remove_accents(str(c)) for c in row if c is not None)
         has_dob = any("sinh" in remove_accents(str(c)) or "dob" in remove_accents(str(c)) for c in row if c is not None)
         has_name = any("ten" in remove_accents(str(c)) or "name" in remove_accents(str(c)) or "ho" in remove_accents(str(c)) for c in row if c is not None)
         
         if has_mssv:
             score += 5
+        if has_email:
+            score += 4
         if has_dob:
             score += 3
         if has_name:
@@ -400,7 +476,9 @@ def parse_student_data_matrix(matrix: List[List[Any]], header_row_idx: int, head
     """
     Extracts student records from a 2D matrix starting after header_row_idx.
     """
-    mssv_idx, name_idx, ho_idx, ten_idx, dob_idx, class_idx, stt_idx, ignored_headers = identify_columns(headers)
+    mssv_idx, name_idx, ho_idx, ten_idx, dob_idx, class_idx, stt_idx, ignored_headers = identify_columns(
+        headers, matrix=matrix, header_row_idx=header_row_idx
+    )
     
     if mssv_idx is None:
         raise ValueError("Không thể tự động nhận diện cột Mã số sinh viên (MSSV / Mã SV). Vui lòng kiểm tra lại tiêu đề cột trong file.")
@@ -421,6 +499,22 @@ def parse_student_data_matrix(matrix: List[List[Any]], header_row_idx: int, head
         # Skip if MSSV doesn't look like a student code (e.g. repeated header or remark row)
         if "mssv" in remove_accents(raw_mssv) or "ma sv" in remove_accents(raw_mssv):
             continue
+
+        # Extract student ID from email if value contains '@'
+        if "@" in raw_mssv:
+            email_prefix = raw_mssv.split("@")[0].strip()
+            m_code = re.search(r'(?:sv|SV)?(\d{4,12})', email_prefix)
+            if m_code:
+                raw_mssv = m_code.group(1)
+            else:
+                raw_mssv = email_prefix
+
+        # Clean 'sv' / 'SV' prefix if followed by student digits (e.g. sv23150014 -> 23150014)
+        m_sv = re.match(r'^(?:sv|SV)(\d{4,12})$', raw_mssv)
+        if m_sv:
+            raw_mssv = m_sv.group(1)
+
+        raw_mssv = raw_mssv.strip("'\" \t\r\n")
             
         # Avoid duplicate MSSVs within the same upload batch
         if raw_mssv in seen_mssv:

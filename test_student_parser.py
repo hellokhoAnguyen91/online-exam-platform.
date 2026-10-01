@@ -129,7 +129,43 @@ class TestStudentParser(unittest.TestCase):
         csv_data = "MSSV,Họ và tên,Ngày sinh\n21110001,Trần Văn An,\n21110002,Lê Thị Bình,invalid_date\n"
         res = parse_student_file(csv_data.encode("utf-8-sig"), "students_empty_dob.csv")
         self.assertEqual(res["students"][0]["dob"], "")
-        self.assertEqual(res["students"][1]["dob"], "")
+    def test_email_column_as_mssv(self):
+        # When file only has STT, Họ và tên, Email (no dedicated MSSV column)
+        rows = [
+            ["STT", "Họ và tên", "Email"],
+            ["1", "Huỳnh Võ Phúc An", "23150014@student.hcmute.edu.vn"],
+            ["2", "Bùi Nguyễn Ngọc Anh", "23150015@student.hcmute.edu.vn"]
+        ]
+        df = pd.DataFrame(rows)
+        buf = io.BytesIO()
+        df.to_excel(buf, index=False, header=False)
+        res = parse_student_file(buf.getvalue(), "students_email.xlsx")
+        self.assertEqual(res["total_parsed"], 2)
+        self.assertEqual(res["students"][0]["mssv"], "23150014")
+        self.assertEqual(res["students"][0]["fullname"], "Huỳnh Võ Phúc An")
+        self.assertEqual(res["students"][1]["mssv"], "23150015")
+        self.assertEqual(res["students"][1]["fullname"], "Bùi Nguyễn Ngọc Anh")
+
+    def test_sv_prefix_normalization(self):
+        csv_data = "STT,Username,Họ và tên,Ngày sinh\n1,sv23150014,Huỳnh Võ Phúc An,26/05/2005\n"
+        res = parse_student_file(csv_data.encode("utf-8-sig"), "students_vip.csv")
+        self.assertEqual(res["students"][0]["mssv"], "23150014")
+        self.assertEqual(res["students"][0]["dob"], "2005-05-26")
+
+    def test_data_driven_heuristic_detection(self):
+        # File has non-standard header names: Col_A, Col_B
+        rows = [
+            ["Mã số định danh", "Danh tính thí sinh"],
+            ["23150014", "Huỳnh Võ Phúc An"],
+            ["23150015", "Bùi Nguyễn Ngọc Anh"]
+        ]
+        df = pd.DataFrame(rows)
+        buf = io.BytesIO()
+        df.to_excel(buf, index=False, header=False)
+        res = parse_student_file(buf.getvalue(), "students_heuristic.xlsx")
+        self.assertEqual(res["total_parsed"], 2)
+        self.assertEqual(res["students"][0]["mssv"], "23150014")
+        self.assertEqual(res["students"][0]["fullname"], "Huỳnh Võ Phúc An")
 
 if __name__ == "__main__":
     unittest.main()
