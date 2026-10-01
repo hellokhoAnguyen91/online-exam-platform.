@@ -2016,12 +2016,17 @@
                 if (cachedAnswers && typeof cachedAnswers === 'object') {
                     // Only restore cached answers that correspond to current questions
                     const validQIds = new Set(examQuestions.map(q => String(q.id)));
+                    let hasRestored = false;
                     Object.keys(cachedAnswers).forEach(k => {
                         if (validQIds.has(String(k))) {
                             studentAnswers[String(k)] = cachedAnswers[k];
+                            hasRestored = true;
                         }
                     });
                     updateProgress();
+                    if (hasRestored) {
+                        triggerAutosave();
+                    }
                 }
                 currentExamMeta = data;
                 document.getElementById('exam-card-title').innerText = data.exam_title || "Kỳ thi trắc nghiệm";

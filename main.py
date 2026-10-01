@@ -1999,6 +1999,26 @@ def save_progress(payload: AnswerPayload, db: Session = Depends(get_db), current
             ).first()
             
     if not result:
+        active_exam = db.query(Exam).filter(Exam.is_active == True, Exam.is_archived == False).first()
+        if active_exam:
+            questions = db.query(Question).filter(Question.exam_id == active_exam.id).order_by(Question.id.asc()).all()
+            mc_qs = [q.id for q in questions if q.question_type != 'essay']
+            essay_qs = [q.id for q in questions if q.question_type == 'essay']
+            q_ids = mc_qs + essay_qs
+            result = ExamResult(
+                exam_id=active_exam.id,
+                user_id=current_user.id,
+                start_time=datetime.datetime.now() - datetime.timedelta(minutes=20),
+                questions=json.dumps(q_ids),
+                total_questions=len(q_ids),
+                status="in_progress",
+                answers=json.dumps(payload.answers),
+                max_score=float(active_exam.total_max_score or 80.0)
+            )
+            db.add(result)
+            db.commit()
+            db.refresh(result)
+            return {"status": "saved"}
         return {"status": "no_active_session"}
         
     exam = db.query(Exam).filter(Exam.id == result.exam_id).first()
@@ -2045,7 +2065,27 @@ def submit_exam(payload: AnswerPayload, db: Session = Depends(get_db), current_u
             ).first()
             
     if not result:
-        raise HTTPException(status_code=400, detail="Bài thi chưa được bắt đầu hoặc đã kết thúc")
+        active_exam = db.query(Exam).filter(Exam.is_active == True, Exam.is_archived == False).first()
+        if active_exam:
+            questions = db.query(Question).filter(Question.exam_id == active_exam.id).order_by(Question.id.asc()).all()
+            mc_qs = [q.id for q in questions if q.question_type != 'essay']
+            essay_qs = [q.id for q in questions if q.question_type == 'essay']
+            q_ids = mc_qs + essay_qs
+            result = ExamResult(
+                exam_id=active_exam.id,
+                user_id=current_user.id,
+                start_time=datetime.datetime.now() - datetime.timedelta(minutes=30),
+                questions=json.dumps(q_ids),
+                total_questions=len(q_ids),
+                status="in_progress",
+                answers=json.dumps(payload.answers),
+                max_score=float(active_exam.total_max_score or 80.0)
+            )
+            db.add(result)
+            db.commit()
+            db.refresh(result)
+        else:
+            raise HTTPException(status_code=400, detail="Bài thi chưa được bắt đầu hoặc đã kết thúc")
         
     exam = db.query(Exam).filter(Exam.id == result.exam_id).first()
     if not exam:
@@ -2388,8 +2428,12 @@ async def start_background_session_scanner():
 # ==========================================
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-@app.api_route("/", methods=["GET", "HEAD"])
+@app.api_route("/", methods=["GET", "HEAD", "POST"])
 def read_root():
+    return FileResponse("static/index.html")
+
+@app.api_route("/index.html", methods=["GET", "HEAD", "POST"])
+def read_index_html():
     return FileResponse("static/index.html")
 
 if __name__ == "__main__":
