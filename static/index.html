@@ -867,6 +867,27 @@
             </div>
         </div>
 
+        <!-- Attached Exam Document Download Banner -->
+        <div class="exam-attachment-banner" style="background:#eff6ff; border:2px solid #60a5fa; border-radius:var(--radius); padding:16px 20px; margin-bottom:18px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:14px; box-shadow:0 3px 6px -1px rgba(37,99,235,0.12);">
+            <div style="display:flex; align-items:center; gap:14px;">
+                <div style="width:48px; height:48px; background:#2563eb; color:white; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:1.6rem; flex-shrink:0; box-shadow:0 2px 4px rgba(37,99,235,0.3);">
+                    📄
+                </div>
+                <div>
+                    <div style="font-weight:800; color:#1e3a8a; font-size:1.05rem; display:flex; align-items:center; gap:8px;">
+                        <span>Tệp Đính Kèm Đề Thi Chính Thức (.docx)</span>
+                        <span class="badge" style="background:#dbeafe; color:#1d4ed8; font-size:0.75rem; font-weight:700;">File Word Gốc</span>
+                    </div>
+                    <div style="font-size:0.86rem; color:#475569; margin-top:3px;">
+                        Tên file: <strong>DE 1 - CK (50 TN + 5 TL) (1).docx</strong> • Thí sinh có thể tải về máy để xem đề thi gốc, tra cứu hình ảnh và bảng biểu đầy đủ.
+                    </div>
+                </div>
+            </div>
+            <a href="/api/exam/download_attached_doc" download="DE 1 - CK (50 TN + 5 TL) (1).docx" class="btn btn-primary" style="display:inline-flex; align-items:center; gap:8px; padding:10px 22px; font-weight:700; text-decoration:none; font-size:0.95rem; white-space:nowrap; background:#2563eb; border-color:#1d4ed8; box-shadow:0 2px 4px rgba(37,99,235,0.25);">
+                📥 Tải Đề Thi Về Máy (.docx)
+            </a>
+        </div>
+
         <!-- Progress Bar -->
         <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.88rem; font-weight:600; color:#475569;">
             <span>Tiến độ hoàn thành: <strong id="progress-text" style="color:var(--primary);">0/0 câu</strong></span>
@@ -911,7 +932,11 @@
                         <!-- Dynamic Grid Buttons -->
                     </div>
 
-                    <button class="btn btn-primary btn-lg" style="width:100%; margin-top:16px;" onclick="promptSubmitExam()">
+                    <a href="/api/exam/download_attached_doc" download="DE 1 - CK (50 TN + 5 TL) (1).docx" class="btn btn-secondary" style="display:flex; align-items:center; justify-content:center; gap:6px; width:100%; margin-top:14px; text-decoration:none; font-weight:700; color:#1d4ed8; background:#eff6ff; border:1.5px solid #bfdbfe; font-size:0.88rem;">
+                        📥 Tải file Word đề thi (.docx)
+                    </a>
+
+                    <button class="btn btn-primary btn-lg" style="width:100%; margin-top:10px;" onclick="promptSubmitExam()">
                         <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                         Nộp Bài Thi
                     </button>
@@ -926,6 +951,7 @@
             <span id="mobile-progress-text">0/0 câu</span>
         </div>
         <div style="display:flex; gap:8px;">
+            <a href="/api/exam/download_attached_doc" download="DE 1 - CK (50 TN + 5 TL) (1).docx" class="btn btn-secondary btn-sm" style="display:inline-flex; align-items:center; gap:4px; text-decoration:none; color:#1d4ed8;">📥 File đề</a>
             <button class="btn btn-secondary btn-sm" onclick="scrollToPalette()">📋 Bảng câu</button>
             <button class="btn btn-primary btn-sm" onclick="promptSubmitExam()">Nộp bài</button>
         </div>

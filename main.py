@@ -1793,6 +1793,29 @@ def export_single_result_excel(
 # ==========================================
 # CANDIDATE / STUDENT EXAM FLOW
 # ==========================================
+@app.get("/api/exam/download_attached_doc")
+def download_attached_exam_doc():
+    """Allow candidates to download the official attached Word exam document."""
+    candidates = [
+        "static/DE_1_CK_50TN_5TL.docx",
+        "static/De_Thi_OHSM332110_De01.docx"
+    ]
+    file_path = None
+    for p in candidates:
+        if os.path.exists(p):
+            file_path = p
+            break
+            
+    if not file_path:
+        raise HTTPException(status_code=404, detail="Không tìm thấy file đề thi đính kèm")
+        
+    return FileResponse(
+        path=file_path,
+        filename="DE 1 - CK (50 TN + 5 TL) (1).docx",
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": 'attachment; filename="DE 1 - CK (50 TN + 5 TL) (1).docx"'}
+    )
+
 @app.get("/api/exam")
 def get_exam(request: Request, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     if current_user.is_admin:
