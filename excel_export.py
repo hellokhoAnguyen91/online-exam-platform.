@@ -145,22 +145,24 @@ def generate_candidate_excel(
     mc_qs = [q for q in audit_questions if q.get("question_type") != "essay"]
     essay_qs = [q for q in audit_questions if q.get("question_type") == "essay"]
 
+    cfg_mc = float(exam_info.get("mc_max_score") if exam_info.get("mc_max_score") is not None else 50.0)
+    cfg_essay = float(exam_info.get("essay_max_score") if exam_info.get("essay_max_score") is not None else 30.0)
+
     if not essay_qs:
-        eff_mc_max = 10.0
+        eff_mc_max = cfg_mc if cfg_mc > 0 else 80.0
         eff_essay_max = 0.0
     elif not mc_qs:
         eff_mc_max = 0.0
-        eff_essay_max = 10.0
+        eff_essay_max = cfg_essay if cfg_essay > 0 else 80.0
     else:
-        cfg_mc = float(exam_info.get("mc_max_score") if exam_info.get("mc_max_score") is not None else 7.0)
-        cfg_essay = float(exam_info.get("essay_max_score") if exam_info.get("essay_max_score") is not None else 3.0)
-        tot_cfg = cfg_mc + cfg_essay
-        if tot_cfg <= 0:
-            cfg_mc = 7.0
-            cfg_essay = 3.0
-            tot_cfg = 10.0
-        eff_mc_max = round((cfg_mc / tot_cfg) * 10.0, 2)
-        eff_essay_max = round(10.0 - eff_mc_max, 2)
+        eff_mc_max = cfg_mc
+        eff_essay_max = cfg_essay
+
+    tot_max = round(eff_mc_max + eff_essay_max, 2)
+    if tot_max <= 0:
+        eff_mc_max = 50.0
+        eff_essay_max = 30.0
+        tot_max = 80.0
 
     total_mc_w = sum(float(q.get("score_weight") or 1.0) for q in mc_qs)
     mc_scale = (eff_mc_max / total_mc_w) if total_mc_w > 0 else 0.0
@@ -181,7 +183,7 @@ def generate_candidate_excel(
     class_name = candidate_info.get("class_name", "-") or "-"
     submit_str = candidate_info.get("submit_time_str", "-")
     score_display = candidate_info.get("score")
-    score_str = f"{score_display}/10.0" if score_display is not None else "Chờ chấm"
+    score_str = f"{score_display}/{tot_max:g}" if score_display is not None else "Chờ chấm"
 
     ws.merge_cells("A4:F4")
     ws["A4"] = f"Thí sinh: {fullname} | MSSV: {mssv} | Lớp: {class_name} | Thời gian nộp: {submit_str} | Điểm số: {score_str}"
@@ -452,8 +454,8 @@ def generate_candidate_audit_excel(res: Any, exam: Any, student: Any, db: Any) -
         "code": getattr(exam, 'code', '') or '',
         "duration_minutes": getattr(exam, 'duration_minutes', 30),
         "num_questions": getattr(exam, 'num_questions', 10),
-        "mc_max_score": getattr(exam, 'mc_max_score', 7.0) if getattr(exam, 'mc_max_score', None) is not None else 7.0,
-        "essay_max_score": getattr(exam, 'essay_max_score', 3.0) if getattr(exam, 'essay_max_score', None) is not None else 3.0
+        "mc_max_score": getattr(exam, 'mc_max_score', 50.0) if getattr(exam, 'mc_max_score', None) is not None else 50.0,
+        "essay_max_score": getattr(exam, 'essay_max_score', 30.0) if getattr(exam, 'essay_max_score', None) is not None else 30.0
     }
     candidate_info = {
         "username": student.username if student else "unknown",
@@ -461,7 +463,7 @@ def generate_candidate_audit_excel(res: Any, exam: Any, student: Any, db: Any) -
         "dob": getattr(student, 'dob', None) or "-",
         "class_name": getattr(student, 'class_name', None) or "-",
         "score": getattr(res, 'score', None),
-        "max_score": getattr(res, 'max_score', 10.0) or 10.0,
+        "max_score": getattr(res, 'max_score', 80.0) or 80.0,
         "correct_count": getattr(res, 'correct_count', 0) or 0,
         "total_questions": getattr(res, 'total_questions', len(audit_questions)) or len(audit_questions),
         "duration_str": dur_str,
@@ -501,8 +503,9 @@ def generate_class_summary_excel(exam: Any, results: List[Any], db: Any) -> byte
     ws["A5"].font = font_sub
 
     # 2. Table Headers
+    tot_max = round((getattr(exam, 'mc_max_score', 50.0) or 50.0) + (getattr(exam, 'essay_max_score', 30.0) or 30.0), 2)
     headers = [
-        "STT", "MSSV", "Họ và tên", "Lớp", "Điểm số (Thang 10)",
+        "STT", "MSSV", "Họ và tên", "Lớp", f"Điểm số (Thang {tot_max:g})",
         "Số câu đúng", "Tổng số câu", "Tỷ lệ đúng (%)",
         "Thời lượng", "Thời gian bắt đầu", "Thời gian nộp bài", "Trạng thái"
     ]

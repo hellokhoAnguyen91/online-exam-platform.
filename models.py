@@ -33,9 +33,15 @@ class Exam(Base):
     allow_review = Column(Boolean, default=True) # Sinh viên được xem lại đáp án sau khi nộp
     shuffle_questions = Column(Boolean, default=True)
     shuffle_options = Column(Boolean, default=False)
-    mc_max_score = Column(Float, default=7.0) # Điểm tối đa phần trắc nghiệm (thang 10)
-    essay_max_score = Column(Float, default=3.0) # Điểm tối đa phần tự luận (thang 10)
+    mc_max_score = Column(Float, default=50.0) # Điểm tối đa phần trắc nghiệm / lý thuyết
+    essay_max_score = Column(Float, default=30.0) # Điểm tối đa phần tự luận
     created_at = Column(DateTime, default=datetime.datetime.now)
+
+    @property
+    def total_max_score(self):
+        mc = self.mc_max_score if self.mc_max_score is not None else 50.0
+        essay = self.essay_max_score if self.essay_max_score is not None else 30.0
+        return round(mc + essay, 2)
 
 class Question(Base):
     __tablename__ = "questions"
@@ -72,7 +78,7 @@ class ExamResult(Base):
     exam_id = Column(Integer, ForeignKey("exams.id", ondelete="CASCADE"), nullable=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
     score = Column(Float, default=0.0)
-    max_score = Column(Float, default=10.0)
+    max_score = Column(Float, default=80.0)
     correct_count = Column(Integer, default=0)
     total_questions = Column(Integer, default=0)
     answers = Column(Text, nullable=True) # JSON: {"<q_id>": "A"}

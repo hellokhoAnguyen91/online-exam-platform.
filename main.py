@@ -97,8 +97,8 @@ class ExamCreate(BaseModel):
     close_time: Optional[str] = None
     allow_review: bool = True
     shuffle_questions: bool = True
-    mc_max_score: float = 7.0
-    essay_max_score: float = 3.0
+    mc_max_score: float = 50.0
+    essay_max_score: float = 30.0
 
 class ExamUpdate(BaseModel):
     title: Optional[str] = None
@@ -348,8 +348,9 @@ def list_exams(db: Session = Depends(get_db), current_user: User = Depends(get_c
             "archived_at": ex.archived_at.isoformat() if ex.archived_at else None,
             "allow_review": ex.allow_review,
             "shuffle_questions": ex.shuffle_questions,
-            "mc_max_score": getattr(ex, 'mc_max_score', 7.0) if getattr(ex, 'mc_max_score', None) is not None else 7.0,
-            "essay_max_score": getattr(ex, 'essay_max_score', 3.0) if getattr(ex, 'essay_max_score', None) is not None else 3.0,
+            "mc_max_score": getattr(ex, 'mc_max_score', 50.0) if getattr(ex, 'mc_max_score', None) is not None else 50.0,
+            "essay_max_score": getattr(ex, 'essay_max_score', 30.0) if getattr(ex, 'essay_max_score', None) is not None else 30.0,
+            "total_max_score": round((getattr(ex, 'mc_max_score', 50.0) if getattr(ex, 'mc_max_score', None) is not None else 50.0) + (getattr(ex, 'essay_max_score', 30.0) if getattr(ex, 'essay_max_score', None) is not None else 30.0), 2),
             "created_at": ex.created_at.strftime("%Y-%m-%d %H:%M:%S") if ex.created_at else None,
             "question_count": q_count,
             "candidate_count": candidate_count,
@@ -373,8 +374,8 @@ def create_exam(payload: ExamCreate, db: Session = Depends(get_db), current_user
         close_time=parse_iso_dt(payload.close_time),
         allow_review=payload.allow_review,
         shuffle_questions=payload.shuffle_questions,
-        mc_max_score=payload.mc_max_score if payload.mc_max_score is not None else 7.0,
-        essay_max_score=payload.essay_max_score if payload.essay_max_score is not None else 3.0,
+        mc_max_score=payload.mc_max_score if payload.mc_max_score is not None else 50.0,
+        essay_max_score=payload.essay_max_score if payload.essay_max_score is not None else 30.0,
         is_active=False,
         is_archived=False,
         created_at=datetime.datetime.now()
@@ -1098,23 +1099,25 @@ def calculate_exam_score(audit_details: list, q_dict: dict, exam: Optional[Exam]
     mc_items = [d for d in audit_details if q_dict.get(d.get("id")) and q_dict[d["id"]].question_type != "essay"]
     essay_items = [d for d in audit_details if q_dict.get(d.get("id")) and q_dict[d["id"]].question_type == "essay"]
     
-    # 1. Effective max points
+    # 1. Effective max points from exam config
+    cfg_mc = float(getattr(exam, 'mc_max_score', 50.0) if exam and getattr(exam, 'mc_max_score', None) is not None else 50.0)
+    cfg_essay = float(getattr(exam, 'essay_max_score', 30.0) if exam and getattr(exam, 'essay_max_score', None) is not None else 30.0)
+    
     if not essay_items:
-        eff_mc_max = 10.0
+        eff_mc_max = cfg_mc if cfg_mc > 0 else (cfg_mc + cfg_essay if (cfg_mc + cfg_essay) > 0 else 80.0)
         eff_essay_max = 0.0
     elif not mc_items:
         eff_mc_max = 0.0
-        eff_essay_max = 10.0
+        eff_essay_max = cfg_essay if cfg_essay > 0 else (cfg_mc + cfg_essay if (cfg_mc + cfg_essay) > 0 else 80.0)
     else:
-        cfg_mc = float(getattr(exam, 'mc_max_score', 7.0) if exam and getattr(exam, 'mc_max_score', None) is not None else 7.0)
-        cfg_essay = float(getattr(exam, 'essay_max_score', 3.0) if exam and getattr(exam, 'essay_max_score', None) is not None else 3.0)
-        tot_cfg = cfg_mc + cfg_essay
-        if tot_cfg <= 0:
-            cfg_mc = 7.0
-            cfg_essay = 3.0
-            tot_cfg = 10.0
-        eff_mc_max = round((cfg_mc / tot_cfg) * 10.0, 2)
-        eff_essay_max = round(10.0 - eff_mc_max, 2)
+        eff_mc_max = cfg_mc
+        eff_essay_max = cfg_essay
+
+    eff_total_max = round(eff_mc_max + eff_essay_max, 2)
+    if eff_total_max <= 0:
+        eff_mc_max = 50.0
+        eff_essay_max = 30.0
+        eff_total_max = 80.0
 
     # 2. Scale factor for MC
     sum_mc_weights = sum(float(q_dict[d["id"]].score_weight or 1.0) for d in mc_items)
@@ -1137,7 +1140,10 @@ def calculate_exam_score(audit_details: list, q_dict: dict, exam: Optional[Exam]
             d["points"] = 0.0
         elif d.get("status") == "graded" and "essay_score" in d and d["essay_score"] is not None:
             raw_sc = float(d["essay_score"])
-            item_pts = round(raw_sc * mc_scale, 2)
+            if raw_sc > weight + 1e-4 or mc_scale == 1.0:
+                item_pts = round(raw_sc, 2)
+            else:
+                item_pts = round(raw_sc * mc_scale, 2)
             d["earned_score"] = raw_sc
             d["points"] = item_pts
             mc_earned += item_pts
@@ -1151,15 +1157,20 @@ def calculate_exam_score(audit_details: list, q_dict: dict, exam: Optional[Exam]
             mc_earned += item_pts
             if d.get("is_correct") or d.get("status") == "correct":
                 correct_count += 1
+
     essay_earned = 0.0
     for d in essay_items:
         q_obj = q_dict.get(d["id"])
         raw_weight = float(q_obj.score_weight or 1.0) if q_obj else 1.0
-        d["score_weight"] = round(raw_weight * essay_scale, 2)
+        q_eff_max = round(raw_weight * essay_scale, 2)
+        d["score_weight"] = q_eff_max
         
         if "essay_score" in d and d["essay_score"] is not None:
             raw_sc = float(d["essay_score"])
-            item_pts = round(raw_sc * essay_scale, 2)
+            if raw_sc > raw_weight + 1e-4 or essay_scale == 1.0:
+                item_pts = min(q_eff_max, round(raw_sc, 2))
+            else:
+                item_pts = round(raw_sc * essay_scale, 2)
             d["points"] = item_pts
             essay_earned += item_pts
         elif d.get("status") == "unanswered":
@@ -1173,6 +1184,7 @@ def calculate_exam_score(audit_details: list, q_dict: dict, exam: Optional[Exam]
 
     return {
         "score": total_score,
+        "max_score": eff_total_max,
         "mc_score": round(mc_earned, 2),
         "mc_max_score": eff_mc_max,
         "essay_score": round(essay_earned, 2) if not has_pending else None,
@@ -1198,6 +1210,12 @@ def score_essay(result_id: int, payload: EssayScoreUpdate, db: Session = Depends
     questions = db.query(Question).filter(Question.id.in_(q_ids)).all()
     q_dict = {q.id: q for q in questions}
 
+    # Calculate effective max for each question based on essay_scale
+    essay_qs = [q for q in questions if q.question_type == 'essay']
+    sum_essay_weights = sum(float(q.score_weight or 1.0) for q in essay_qs)
+    cfg_essay = float(getattr(exam, 'essay_max_score', 30.0) if exam and getattr(exam, 'essay_max_score', None) is not None else 30.0)
+    essay_scale = (cfg_essay / sum_essay_weights) if sum_essay_weights > 0 else 1.0
+
     for detail in audit_details:
         q_id = detail.get("id")
         q = q_dict.get(q_id)
@@ -1207,20 +1225,20 @@ def score_essay(result_id: int, payload: EssayScoreUpdate, db: Session = Depends
         score_val = payload.scores.get(str(q_id)) if str(q_id) in payload.scores else payload.scores.get(q_id)
         if score_val is not None:
             score = float(score_val)
-            max_w = q.score_weight if (q and q.score_weight is not None) else 1.0
-            if score < 0.0 or score > (max_w + 1e-5):
-                raise HTTPException(status_code=400, detail=f"Điểm số ({score}) không hợp lệ! Điểm phải nằm trong khoảng từ 0.0 đến {max_w}")
+            eff_max_w = round(float(q.score_weight or 1.0) * essay_scale, 2)
+            if score < 0.0 or score > (eff_max_w + 1e-4):
+                raise HTTPException(status_code=400, detail=f"Điểm số ({score}) không hợp lệ! Điểm phải nằm trong khoảng từ 0.0 đến {eff_max_w}")
             detail["essay_score"] = score
             detail["status"] = "graded"
 
     scoring = calculate_exam_score(audit_details, q_dict, exam)
     res.score = scoring["score"]
     res.correct_count = scoring["correct_count"]
-    res.max_score = 10.0
+    res.max_score = scoring["max_score"]
     res.answers_detail = json.dumps(audit_details, ensure_ascii=False)
     db.commit()
     
-    return {"detail": "Đã cập nhật điểm thành công", "new_score": res.score, "needs_grading": scoring["has_pending"]}
+    return {"detail": "Đã cập nhật điểm thành công", "new_score": res.score, "max_score": res.max_score, "needs_grading": scoring["has_pending"]}
 
 # ==========================================
 # RESULTS & AUDIT REVIEW SYSTEM
@@ -1331,7 +1349,7 @@ def auto_close_exam_result(result: ExamResult, db: Session, exam: Optional[Exam]
     
     scoring = calculate_exam_score(audit_details, q_dict, exam)
     result.score = scoring["score"]
-    result.max_score = 10.0
+    result.max_score = scoring["max_score"]
     result.correct_count = scoring["correct_count"]
     result.total_questions = len(q_ids)
     result.answers_detail = json.dumps(audit_details, ensure_ascii=False)
@@ -1522,7 +1540,7 @@ def get_result_detail(result_id: int, db: Session = Depends(get_db), current_use
             "duration_minutes": exam.duration_minutes if exam else 30
         },
         "score": scoring["score"] if res.score is not None else None,
-        "max_score": res.max_score or 10.0,
+        "max_score": res.max_score or scoring["max_score"],
         "correct_count": scoring["correct_count"],
         "total_questions": res.total_questions or len(audit_questions),
         "incorrect_count": ((res.total_questions or len(audit_questions)) - scoring["correct_count"]) if scoring["correct_count"] is not None else None,
@@ -1807,12 +1825,18 @@ def get_exam(request: Request, db: Session = Depends(get_db), current_user: User
     if close_t and now > close_t:
         raise HTTPException(status_code=400, detail=f"Kỳ thi đã kết thúc vào lúc {close_t.strftime('%H:%M %d/%m/%Y')}")
         
+    cfg_mc = float(getattr(active_exam, 'mc_max_score', 50.0) if getattr(active_exam, 'mc_max_score', None) is not None else 50.0)
+    cfg_essay = float(getattr(active_exam, 'essay_max_score', 30.0) if getattr(active_exam, 'essay_max_score', None) is not None else 30.0)
+    tot_max = round(cfg_mc + cfg_essay, 2)
+    if tot_max <= 0:
+        tot_max = 80.0
+
     # If already submitted
     if result and result.status == "submitted":
         return {
             "status": "submitted",
             "score": result.score,
-            "max_score": 10.0,
+            "max_score": result.max_score or tot_max,
             "correct_count": result.correct_count,
             "total_questions": result.total_questions,
             "allow_review": active_exam.allow_review,
@@ -1892,10 +1916,25 @@ def get_exam(request: Request, db: Session = Depends(get_db), current_user: User
     essay_ids = [qid for qid in q_ids if q_dict.get(qid) and q_dict[qid].question_type == 'essay']
     ordered_q_ids = mc_ids + essay_ids if (mc_ids or essay_ids) else q_ids
     
+    # Scale question weights dynamically according to exam's mc_max_score and essay_max_score
+    mc_objs = [q_dict[qid] for qid in mc_ids if q_dict.get(qid)]
+    essay_objs = [q_dict[qid] for qid in essay_ids if q_dict.get(qid)]
+    
+    sum_mc = sum(float(q.score_weight or 1.0) for q in mc_objs)
+    sum_essay = sum(float(q.score_weight or 1.0) for q in essay_objs)
+    
+    mc_scale = (cfg_mc / sum_mc) if sum_mc > 0 else 1.0
+    essay_scale = (cfg_essay / sum_essay) if sum_essay > 0 else 1.0
+
     q_list = []
     for qid in ordered_q_ids:
         q = q_dict.get(qid)
         if q:
+            raw_w = float(q.score_weight or 1.0)
+            if q.question_type == 'essay':
+                eff_w = round(raw_w * essay_scale, 2)
+            else:
+                eff_w = round(raw_w * mc_scale, 2)
             q_list.append({
                 "id": q.id,
                 "content": q.content,
@@ -1906,7 +1945,7 @@ def get_exam(request: Request, db: Session = Depends(get_db), current_user: User
                 "option_e": clean_exam_option(getattr(q, 'option_e', '') or ''),
                 "option_f": clean_exam_option(getattr(q, 'option_f', '') or ''),
                 "question_type": q.question_type or 'multiple_choice',
-                "score_weight": q.score_weight
+                "score_weight": eff_w
             })
             
     # Calculate time left
@@ -1920,7 +1959,7 @@ def get_exam(request: Request, db: Session = Depends(get_db), current_user: User
             "status": "submitted",
             "exam_id": active_exam.id,
             "score": result.score,
-            "max_score": 10.0,
+            "max_score": result.max_score or tot_max,
             "correct_count": result.correct_count,
             "total_questions": result.total_questions,
             "allow_review": active_exam.allow_review,
@@ -1936,6 +1975,9 @@ def get_exam(request: Request, db: Session = Depends(get_db), current_user: User
         "questions": q_list,
         "mc_count": len(mc_ids),
         "essay_count": len(essay_ids),
+        "mc_max_score": cfg_mc,
+        "essay_max_score": cfg_essay,
+        "total_max_score": tot_max,
         "time_left": int(time_left),
         "answers": json.loads(result.answers) if result.answers else {}
     }
@@ -2133,7 +2175,7 @@ def submit_exam(payload: AnswerPayload, db: Session = Depends(get_db), current_u
     result.score = scaled_score
     result.answers = json.dumps(answers_dict)
     result.answers_detail = json.dumps(audit_details, ensure_ascii=False)
-    result.max_score = 10.0
+    result.max_score = scoring["max_score"]
     result.correct_count = scoring["correct_count"]
     result.total_questions = total_q
     result.duration_seconds = duration_sec
@@ -2144,7 +2186,7 @@ def submit_exam(payload: AnswerPayload, db: Session = Depends(get_db), current_u
     return {
         "status": "submitted",
         "score": scaled_score,
-        "max_score": 10.0,
+        "max_score": scoring["max_score"],
         "correct_count": scoring["correct_count"],
         "total_questions": total_q,
         "duration_seconds": duration_sec,
@@ -2243,12 +2285,13 @@ def review_my_exam(db: Session = Depends(get_db), current_user: User = Depends(g
     essay_weight = sum(q.get("score_weight", 1.0) or 1.0 for q in essay_qs)
     has_pending_essay = any(q.get("status") == "pending_grading" or ("essay_score" not in q and q.get("status") != "unanswered") for q in essay_qs)
 
+    tot_max = round((getattr(exam, 'mc_max_score', 50.0) or 50.0) + (getattr(exam, 'essay_max_score', 30.0) or 30.0), 2)
     return {
         "exam_title": exam.title,
         "fullname": current_user.fullname,
         "mssv": current_user.username,
         "score": res.score,
-        "max_score": 10.0,
+        "max_score": res.max_score or tot_max,
         "correct_count": res.correct_count,
         "total_questions": res.total_questions or len(safe_audit_questions),
         "duration_seconds": res.duration_seconds,
@@ -2256,10 +2299,10 @@ def review_my_exam(db: Session = Depends(get_db), current_user: User = Depends(g
         "mc_count": len(mc_qs),
         "mc_correct": mc_correct,
         "mc_score": round(mc_score, 2),
-        "mc_max_score": round(mc_weight, 2),
+        "mc_max_score": getattr(exam, 'mc_max_score', 50.0) if getattr(exam, 'mc_max_score', None) is not None else round(mc_weight, 2),
         "essay_count": len(essay_qs),
         "essay_score": round(essay_score, 2) if not has_pending_essay else None,
-        "essay_max_score": round(essay_weight, 2),
+        "essay_max_score": getattr(exam, 'essay_max_score', 30.0) if getattr(exam, 'essay_max_score', None) is not None else round(essay_weight, 2),
         "has_pending_essay": has_pending_essay,
         "questions": safe_audit_questions
     }

@@ -849,6 +849,17 @@
                 <span class="badge badge-warning" style="background:rgba(255,255,255,0.2); color:white; margin-bottom:6px;">Đang làm bài</span>
                 <h2 id="exam-card-title" style="font-size:1.35rem; font-weight:800;">Kỳ thi trắc nghiệm</h2>
                 <p style="opacity:0.9; font-size:0.9rem;" id="exam-card-student">Thí sinh: --</p>
+                <div id="exam-card-score-strip" style="display:flex; align-items:center; gap:8px; margin-top:8px; flex-wrap:wrap;">
+                    <span class="badge" style="background:rgba(255,255,255,0.25); color:white; font-size:0.85rem; font-weight:700;">
+                        🏆 Thang điểm: <span id="exam-card-total-score">80.0</span> điểm
+                    </span>
+                    <span class="badge" style="background:rgba(255,255,255,0.2); color:white; font-size:0.82rem;">
+                        🔘 Lý thuyết: <span id="exam-card-mc-score">50.0</span> đ
+                    </span>
+                    <span class="badge" style="background:rgba(255,255,255,0.2); color:white; font-size:0.82rem;">
+                        📝 Tự luận: <span id="exam-card-essay-score">30.0</span> đ
+                    </span>
+                </div>
             </div>
             <div class="exam-timer-box" id="timer-box">
                 <span style="font-size:0.75rem; text-transform:uppercase; letter-spacing:1px; display:block; opacity:0.85;">Thời gian còn lại</span>
@@ -1175,42 +1186,77 @@
                     </div>
                 </div>
 
-                <!-- Phân chia tỷ lệ điểm Trắc nghiệm & Tự luận -->
-                <div style="background: #f8fafc; border: 1.5px solid #cbd5e1; border-radius: var(--radius); padding: 16px; margin: 16px 0;">
-                    <div style="margin-bottom: 14px;">
-                        <strong style="color: #0f172a; font-size: 0.95rem; display: flex; align-items: center; gap: 6px;">
-                            ⚖️ Tỷ lệ phân chia điểm giữa Trắc nghiệm & Tự luận (Thang 10 điểm)
+                <!-- Phân chia thang điểm & tỷ lệ điểm Trắc nghiệm & Tự luận -->
+                <div style="background: #f8fafc; border: 1.5px solid #cbd5e1; border-radius: var(--radius); padding: 18px; margin: 16px 0;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 14px; flex-wrap:wrap; gap:8px;">
+                        <strong style="color: #0f172a; font-size: 0.98rem; display: flex; align-items: center; gap: 6px;">
+                            🎯 Cấu hình Thang điểm & Phân chia điểm bài thi
                         </strong>
+                        <span id="cfg-score-summary-badge" class="badge" style="background:#e0e7ff; color:#3730a3; font-weight:700; font-size:0.85rem;">
+                            Tổng điểm: 80 điểm (Lý thuyết 50đ + Tự luận 30đ)
+                        </span>
                     </div>
 
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+                    <!-- 3 Cột: Tổng điểm | Điểm Trắc nghiệm (Lý thuyết) | Điểm Tự luận -->
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px;">
+                        <!-- 1. Tổng điểm toàn bài thi -->
+                        <div class="input-group" style="margin-bottom: 0;">
+                            <label style="font-weight: 700; color: #0f172a; font-size: 0.85rem;">
+                                🏆 Tổng điểm toàn bài:
+                            </label>
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                                <input type="number" id="cfg-total-score" class="input-control" min="1" max="1000" step="0.5" value="80" required oninput="handleScoreRatioChange('total')">
+                                <span style="font-weight: 700; color: #475569;">điểm</span>
+                            </div>
+                        </div>
+
+                        <!-- 2. Điểm Trắc nghiệm (Lý thuyết) -->
                         <div class="input-group" style="margin-bottom: 0;">
                             <label style="font-weight: 700; color: #1e3a8a; font-size: 0.85rem;">
-                                🔘 Điểm phần Trắc nghiệm (tối đa):
+                                🔘 Trắc nghiệm (Lý thuyết):
                             </label>
                             <div style="display: flex; align-items: center; gap: 6px;">
-                                <input type="number" id="cfg-mc-score" class="input-control" min="0" max="10" step="0.5" value="7.0" required oninput="handleScoreRatioChange('mc')">
-                                <span style="font-weight: 700; color: #475569;">/ 10 đ</span>
+                                <input type="number" id="cfg-mc-score" class="input-control" min="0" max="1000" step="0.5" value="50" required oninput="handleScoreRatioChange('mc')">
+                                <span style="font-weight: 700; color: #475569;">điểm</span>
                             </div>
                         </div>
+
+                        <!-- 3. Điểm Tự luận -->
                         <div class="input-group" style="margin-bottom: 0;">
                             <label style="font-weight: 700; color: #92400e; font-size: 0.85rem;">
-                                📝 Điểm phần Tự luận (tối đa):
+                                📝 Phần Tự luận:
                             </label>
                             <div style="display: flex; align-items: center; gap: 6px;">
-                                <input type="number" id="cfg-essay-score" class="input-control" min="0" max="10" step="0.5" value="3.0" required oninput="handleScoreRatioChange('essay')">
-                                <span style="font-weight: 700; color: #475569;">/ 10 đ</span>
+                                <input type="number" id="cfg-essay-score" class="input-control" min="0" max="1000" step="0.5" value="30" required oninput="handleScoreRatioChange('essay')">
+                                <span style="font-weight: 700; color: #475569;">điểm</span>
                             </div>
                         </div>
+                    </div>
+
+                    <!-- Mẫu cấu hình nhanh (Presets) -->
+                    <div style="display:flex; align-items:center; gap:8px; margin-top:12px; flex-wrap:wrap;">
+                        <span style="font-size:0.8rem; color:#64748b; font-weight:600;">Mẫu thang điểm nhanh:</span>
+                        <button type="button" class="btn btn-secondary btn-sm" style="font-size:0.78rem; padding:4px 10px;" onclick="setScorePreset(80, 50, 30)">
+                            80 điểm (50 TN + 30 TL)
+                        </button>
+                        <button type="button" class="btn btn-secondary btn-sm" style="font-size:0.78rem; padding:4px 10px;" onclick="setScorePreset(100, 60, 40)">
+                            100 điểm (60 TN + 40 TL)
+                        </button>
+                        <button type="button" class="btn btn-secondary btn-sm" style="font-size:0.78rem; padding:4px 10px;" onclick="setScorePreset(100, 70, 30)">
+                            100 điểm (70 TN + 30 TL)
+                        </button>
+                        <button type="button" class="btn btn-secondary btn-sm" style="font-size:0.78rem; padding:4px 10px;" onclick="setScorePreset(10, 7, 3)">
+                            10 điểm (7 TN + 3 TL)
+                        </button>
                     </div>
 
                     <!-- Dynamic Live Calculation Preview -->
-                    <div id="cfg-score-preview-box" style="margin-top: 12px; background: #ffffff; border: 1px dashed #93c5fd; border-radius: 6px; padding: 10px 14px; font-size: 0.85rem; color: #1e293b; display: flex; flex-direction: column; gap: 4px;">
+                    <div id="cfg-score-preview-box" style="margin-top: 12px; background: #ffffff; border: 1px dashed #93c5fd; border-radius: 8px; padding: 12px 16px; font-size: 0.88rem; color: #1e293b; display: flex; flex-direction: column; gap: 6px;">
                         <div id="cfg-score-preview-mc" style="color: #1e40af; font-weight: 600;">
-                            ⚡ Mỗi câu trắc nghiệm đúng: <span style="color: #059669; font-weight: 800;" id="cfg-score-per-mc">0.14</span> đ/câu (Dựa trên 50 câu trắc nghiệm)
+                            ⚡ Phần Trắc nghiệm (Lý thuyết): <span style="color: #059669; font-weight: 800;" id="cfg-score-per-mc">1.00</span> đ/câu (Tổng 50 câu = <strong>50.0</strong> đ)
                         </div>
                         <div id="cfg-score-preview-essay" style="color: #92400e; font-weight: 600;">
-                            📝 Tổng điểm 5 câu tự luận: <span style="color: #d97706; font-weight: 800;" id="cfg-score-total-essay">3.0</span> đ
+                            📝 Phần Tự luận: <span style="color: #d97706; font-weight: 800;" id="cfg-score-total-essay">30.0</span> đ (Tổng 5 câu tự luận)
                         </div>
                     </div>
                 </div>
@@ -1295,7 +1341,7 @@
                             <th>STT</th>
                             <th>Mã số sinh viên (MSSV)</th>
                             <th>Họ và tên</th>
-                            <th>Điểm số (Thang 10)</th>
+                            <th id="th-results-score">Điểm số</th>
                             <th>Số câu đúng</th>
                             <th>Thời lượng làm bài</th>
                             <th>Thời gian nộp</th>
@@ -1347,7 +1393,7 @@
         <!-- Audit Summary Info -->
         <div style="background:#f8fafc; border:1px solid var(--border); border-radius:var(--radius); padding:18px; margin-bottom:20px; display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:12px;">
             <div>
-                <span style="font-size:0.8rem; color:#64748b;">Điểm số (Thang 10):</span>
+                <span style="font-size:0.8rem; color:#64748b;" id="audit-score-label">Điểm số:</span>
                 <div style="font-size:1.6rem; font-weight:900; color:var(--primary);" id="audit-score">--</div>
             </div>
             <div>
@@ -1977,8 +2023,21 @@
                     });
                     updateProgress();
                 }
+                currentExamMeta = data;
                 document.getElementById('exam-card-title').innerText = data.exam_title || "Kỳ thi trắc nghiệm";
                 document.getElementById('exam-card-student').innerText = `Thí sinh: ${currentUser.fullname} (${currentUser.username})`;
+
+                const mcMax = (data.mc_max_score !== undefined && data.mc_max_score !== null) ? data.mc_max_score : 50.0;
+                const essayMax = (data.essay_max_score !== undefined && data.essay_max_score !== null) ? data.essay_max_score : 30.0;
+                const totalMax = (data.total_max_score !== undefined && data.total_max_score !== null) ? data.total_max_score : (mcMax + essayMax);
+
+                const elTotal = document.getElementById('exam-card-total-score');
+                if (elTotal) elTotal.innerText = totalMax.toFixed(1);
+                const elMc = document.getElementById('exam-card-mc-score');
+                if (elMc) elMc.innerText = mcMax.toFixed(1);
+                const elEssay = document.getElementById('exam-card-essay-score');
+                if (elEssay) elEssay.innerText = essayMax.toFixed(1);
+
                 renderQuestions(examQuestions);
                 renderPalette(examQuestions);
                 updateProgress();
@@ -2135,23 +2194,25 @@
 
         // 1. Render Part I: Trắc nghiệm
         if (mcQuestions.length > 0) {
+            const mcMax = (currentExamMeta && currentExamMeta.mc_max_score !== undefined) ? currentExamMeta.mc_max_score : 50.0;
+            const ptsPerMc = mcQuestions.length > 0 ? (mcMax / mcQuestions.length).toFixed(2) : '1.00';
             const mcBanner = document.createElement('div');
             mcBanner.className = 'exam-section-banner';
             mcBanner.style = "background: linear-gradient(135deg, #1e3a8a, #2563eb); color: white; border-radius: var(--radius); padding: 16px 20px; margin-bottom: 20px; box-shadow: var(--shadow);";
             const secBadge1 = hasBoth ? 'PHẦN I' : 'TRẮC NGHIỆM';
-            const secTitle1 = hasBoth ? 'PHẦN I: CÂU HỎI TRẮC NGHIỆM' : 'CÂU HỎI TRẮC NGHIỆM';
+            const secTitle1 = hasBoth ? 'PHẦN I: CÂU HỎI TRẮC NGHIỆM (LÝ THUYẾT)' : 'CÂU HỎI TRẮC NGHIỆM (LÝ THUYẾT)';
             mcBanner.innerHTML = `
                 <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
                     <div>
                         <span class="badge" style="background:rgba(255,255,255,0.22); color:white; font-weight:700; margin-bottom:4px; font-size:0.75rem; letter-spacing:0.5px;">${secBadge1}</span>
                         <h3 style="font-size:1.25rem; font-weight:800; margin:0; color:white;">${secTitle1}</h3>
                     </div>
-                    <div style="background:rgba(255,255,255,0.2); padding:6px 14px; border-radius:20px; font-weight:700; font-size:0.88rem;">
-                        ${mcQuestions.length} câu hỏi
+                    <div style="background:rgba(255,255,255,0.2); padding:6px 14px; border-radius:20px; font-weight:700; font-size:0.88rem; text-align:right;">
+                        ${mcQuestions.length} câu • <span style="color:#fef08a; font-weight:800;">${mcMax.toFixed(1)} điểm</span>
                     </div>
                 </div>
                 <p style="margin:8px 0 0 0; opacity:0.92; font-size:0.88rem;">
-                    Thí sinh đọc kỹ nội dung và chọn đáp án chính xác cho từng câu hỏi dưới đây.
+                    Thí sinh đọc kỹ nội dung và chọn đáp án chính xác cho từng câu hỏi (Mỗi câu ~${ptsPerMc} điểm).
                 </p>
             `;
             c.appendChild(mcBanner);
@@ -2163,6 +2224,8 @@
 
         // 2. Render Part II: Tự luận
         if (essayQuestions.length > 0) {
+            const essayMax = (currentExamMeta && currentExamMeta.essay_max_score !== undefined) ? currentExamMeta.essay_max_score : 30.0;
+            const ptsPerEssay = essayQuestions.length > 0 ? (essayMax / essayQuestions.length).toFixed(2) : '6.00';
             const essayBanner = document.createElement('div');
             essayBanner.className = 'exam-section-banner';
             essayBanner.style = "background: linear-gradient(135deg, #92400e, #d97706); color: white; border-radius: var(--radius); padding: 16px 20px; margin: 30px 0 20px 0; box-shadow: var(--shadow);";
@@ -2174,12 +2237,12 @@
                         <span class="badge" style="background:rgba(255,255,255,0.22); color:white; font-weight:700; margin-bottom:4px; font-size:0.75rem; letter-spacing:0.5px;">${secBadge2}</span>
                         <h3 style="font-size:1.25rem; font-weight:800; margin:0; color:white;">${secTitle2}</h3>
                     </div>
-                    <div style="background:rgba(255,255,255,0.2); padding:6px 14px; border-radius:20px; font-weight:700; font-size:0.88rem;">
-                        ${essayQuestions.length} câu hỏi
+                    <div style="background:rgba(255,255,255,0.2); padding:6px 14px; border-radius:20px; font-weight:700; font-size:0.88rem; text-align:right;">
+                        ${essayQuestions.length} câu • <span style="color:#fef08a; font-weight:800;">${essayMax.toFixed(1)} điểm</span>
                     </div>
                 </div>
                 <p style="margin:8px 0 0 0; opacity:0.92; font-size:0.88rem;">
-                    Thí sinh trình bày bài làm chi tiết vào khung nhập liệu bên dưới mỗi câu hỏi.
+                    Thí sinh trình bày bài làm chi tiết vào khung nhập liệu bên dưới mỗi câu hỏi (Tổng điểm phần tự luận: ${essayMax.toFixed(1)} điểm, trung bình ~${ptsPerEssay} đ/câu).
                 </p>
             `;
             c.appendChild(essayBanner);
@@ -2225,6 +2288,9 @@
         }
 
         if (hasBoth) {
+            const mcMax = (currentExamMeta && currentExamMeta.mc_max_score !== undefined) ? currentExamMeta.mc_max_score : 50.0;
+            const essayMax = (currentExamMeta && currentExamMeta.essay_max_score !== undefined) ? currentExamMeta.essay_max_score : 30.0;
+
             // Group 1: Trắc nghiệm
             const mcCard = document.createElement('div');
             mcCard.className = 'palette-group-card';
@@ -2233,7 +2299,7 @@
             mcCard.innerHTML = `
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                     <strong style="font-size:0.84rem; color:#1e40af; display:flex; align-items:center; gap:5px;">
-                        <span>🔘</span> Phần I: Trắc nghiệm
+                        <span>🔘</span> Phần I: Trắc nghiệm (${mcMax.toFixed(1)}đ)
                     </strong>
                     <span class="badge" style="background:#dbeafe; color:#1e40af; font-size:0.75rem;" id="palette-count-mc">0/${mcQuestions.length} đã làm</span>
                 </div>
@@ -2253,7 +2319,7 @@
             essayCard.innerHTML = `
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                     <strong style="font-size:0.84rem; color:#b45309; display:flex; align-items:center; gap:5px;">
-                        <span>📝</span> Phần II: Tự luận
+                        <span>📝</span> Phần II: Tự luận (${essayMax.toFixed(1)}đ)
                     </strong>
                     <span class="badge" style="background:#fef3c7; color:#b45309; font-size:0.75rem;" id="palette-count-essay">0/${essayQuestions.length} đã làm</span>
                 </div>
@@ -2265,7 +2331,7 @@
                 subgridEssay.appendChild(createPaletteButton(item.q, item.idx, true, eIdx));
             });
 
-            document.getElementById('palette-count').innerText = `${mcQuestions.length} TN | ${essayQuestions.length} TL`;
+            document.getElementById('palette-count').innerText = `${mcQuestions.length} TN (${mcMax.toFixed(1)}đ) | ${essayQuestions.length} TL (${essayMax.toFixed(1)}đ)`;
             switchPaletteTab(currentPaletteFilter);
         } else {
             // Only 1 question type in entire exam
@@ -2654,7 +2720,7 @@
             scoreBox.style.borderColor = 'var(--border)';
             scoreTitle.innerText = 'ĐIỂM SỐ CỦA BẠN';
             scoreTitle.style.color = '#64748b';
-            scoreVal.innerText = `${data.score} / ${data.max_score || 10}`;
+            scoreVal.innerText = `${data.score} / ${data.max_score || 80} điểm`;
             scoreVal.style.color = 'var(--primary)';
             scoreSub.innerText = `Số câu trả lời đúng: ${data.correct_count ?? 0} / ${data.total_questions ?? 0}`;
         }
@@ -2813,8 +2879,10 @@
             setCheck('cfg-allow-review', ex.allow_review);
             setCheck('cfg-shuffle-q', ex.shuffle_questions);
 
-            const mcSc = (ex.mc_max_score !== undefined && ex.mc_max_score !== null) ? ex.mc_max_score : 7.0;
-            const essaySc = (ex.essay_max_score !== undefined && ex.essay_max_score !== null) ? ex.essay_max_score : 3.0;
+            const mcSc = (ex.mc_max_score !== undefined && ex.mc_max_score !== null) ? ex.mc_max_score : 50.0;
+            const essaySc = (ex.essay_max_score !== undefined && ex.essay_max_score !== null) ? ex.essay_max_score : 30.0;
+            const totalSc = Math.round((mcSc + essaySc) * 100) / 100;
+            setVal('cfg-total-score', totalSc);
             setVal('cfg-mc-score', mcSc);
             setVal('cfg-essay-score', essaySc);
             updateScoreRatioPreview();
@@ -2822,37 +2890,70 @@
     }
 
     function handleScoreRatioChange(source) {
+        const totalInput = document.getElementById('cfg-total-score');
         const mcInput = document.getElementById('cfg-mc-score');
         const essayInput = document.getElementById('cfg-essay-score');
         if(!mcInput || !essayInput) return;
+        
+        let total = totalInput ? (parseFloat(totalInput.value) || 0) : 80;
         let mc = parseFloat(mcInput.value) || 0;
         let essay = parseFloat(essayInput.value) || 0;
-        if(source === 'mc') {
-            mc = Math.min(10, Math.max(0, mc));
-            essay = Math.max(0, Math.round((10 - mc) * 10) / 10);
-            essayInput.value = essay;
-        } else {
-            essay = Math.min(10, Math.max(0, essay));
-            mc = Math.max(0, Math.round((10 - essay) * 10) / 10);
-            mcInput.value = mc;
+
+        if (source === 'total') {
+            total = Math.max(1, total);
+            if (mc >= total) {
+                mc = Math.round(total * 0.625 * 10) / 10;
+                essay = Math.max(0, Math.round((total - mc) * 10) / 10);
+                mcInput.value = mc;
+                essayInput.value = essay;
+            } else {
+                essay = Math.max(0, Math.round((total - mc) * 10) / 10);
+                essayInput.value = essay;
+            }
+        } else if (source === 'mc') {
+            mc = Math.max(0, mc);
+            if (mc > total) {
+                total = mc + essay;
+                if (totalInput) totalInput.value = total;
+            } else {
+                essay = Math.max(0, Math.round((total - mc) * 10) / 10);
+                essayInput.value = essay;
+            }
+        } else if (source === 'essay') {
+            essay = Math.max(0, essay);
+            if (essay > total) {
+                total = mc + essay;
+                if (totalInput) totalInput.value = total;
+            } else {
+                mc = Math.max(0, Math.round((total - essay) * 10) / 10);
+                mcInput.value = mc;
+            }
         }
         updateScoreRatioPreview();
     }
 
-    function setScoreRatio(mc, essay) {
+    function setScorePreset(total, mc, essay) {
+        const totalInput = document.getElementById('cfg-total-score');
         const mcInput = document.getElementById('cfg-mc-score');
         const essayInput = document.getElementById('cfg-essay-score');
-        if(mcInput) mcInput.value = mc;
-        if(essayInput) essayInput.value = essay;
+        if (totalInput) totalInput.value = total;
+        if (mcInput) mcInput.value = mc;
+        if (essayInput) essayInput.value = essay;
         updateScoreRatioPreview();
     }
 
+    function setScoreRatio(mc, essay) {
+        setScorePreset(mc + essay, mc, essay);
+    }
+
     function updateScoreRatioPreview() {
+        const totalInput = document.getElementById('cfg-total-score');
         const mcInput = document.getElementById('cfg-mc-score');
         const essayInput = document.getElementById('cfg-essay-score');
         if(!mcInput || !essayInput) return;
         const mc = parseFloat(mcInput.value) || 0;
         const essay = parseFloat(essayInput.value) || 0;
+        const total = totalInput ? (parseFloat(totalInput.value) || (mc + essay)) : (mc + essay);
 
         let mcCount = 50;
         let essayCount = 5;
@@ -2869,14 +2970,23 @@
         }
 
         const ptsPerMc = mcCount > 0 ? (mc / mcCount).toFixed(2) : '0.00';
+        const ptsPerEssay = essayCount > 0 ? (essay / essayCount).toFixed(2) : '0.00';
+        const mcPct = total > 0 ? ((mc / total) * 100).toFixed(1) : 0;
+        const essayPct = total > 0 ? ((essay / total) * 100).toFixed(1) : 0;
+
+        const summaryBadge = document.getElementById('cfg-score-summary-badge');
+        if (summaryBadge) {
+            summaryBadge.innerText = `Tổng điểm: ${total} điểm (Lý thuyết ${mc}đ + Tự luận ${essay}đ)`;
+        }
+
         const mcPrevBox = document.getElementById('cfg-score-preview-mc');
         const essayPrevBox = document.getElementById('cfg-score-preview-essay');
 
         if(mcPrevBox) {
-            mcPrevBox.innerHTML = `⚡ Mỗi câu trắc nghiệm đúng: <span style="color:#059669; font-weight:800; font-size:1.05rem;">${ptsPerMc}</span> đ/câu (Tổng ${mcCount} câu trắc nghiệm = <strong>${mc.toFixed(1)}</strong> đ)`;
+            mcPrevBox.innerHTML = `⚡ Phần Trắc nghiệm (Lý thuyết): <span style="color:#059669; font-weight:800; font-size:1.05rem;">${ptsPerMc}</span> đ/câu (Tổng ${mcCount} câu = <strong>${mc.toFixed(1)}</strong> đ • chiếm ${mcPct}%)`;
         }
         if(essayPrevBox) {
-            essayPrevBox.innerHTML = `📝 Phần tự luận (${essayCount} câu): Tổng tối đa <span style="color:#d97706; font-weight:800; font-size:1.05rem;">${essay.toFixed(1)}</span> đ`;
+            essayPrevBox.innerHTML = `📝 Phần Tự luận (${essayCount} câu): Tổng tối đa <span style="color:#d97706; font-weight:800; font-size:1.05rem;">${essay.toFixed(1)}</span> đ (Trung bình ~${ptsPerEssay} đ/câu • chiếm ${essayPct}%)`;
         }
     }
 
@@ -3621,8 +3731,8 @@
             close_time: document.getElementById('cfg-close-time').value || null,
             allow_review: document.getElementById('cfg-allow-review').checked,
             shuffle_questions: document.getElementById('cfg-shuffle-q').checked,
-            mc_max_score: parseFloat(document.getElementById('cfg-mc-score').value) || 7.0,
-            essay_max_score: parseFloat(document.getElementById('cfg-essay-score').value) || 3.0
+            mc_max_score: parseFloat(document.getElementById('cfg-mc-score').value) || 50.0,
+            essay_max_score: parseFloat(document.getElementById('cfg-essay-score').value) || 30.0
         };
 
         const res = await apiReq(`/api/admin/exams/${selectedExamId}`, {
@@ -3631,7 +3741,8 @@
             body: JSON.stringify(payload)
         });
         if(res.ok) {
-            showToast("Đã cập nhật cấu hình kỳ thi thành công!", "success");
+            const tot = (payload.mc_max_score + payload.essay_max_score).toFixed(1);
+            showToast(`Đã cập nhật cấu hình kỳ thi! Thang điểm mới: ${tot} điểm (Lý thuyết ${payload.mc_max_score}đ + Tự luận ${payload.essay_max_score}đ)`, "success");
             loadAdminExams();
         }
     }
@@ -3665,10 +3776,12 @@
                 scoreDisplay = `<span class="badge" style="background:#fef3c7; color:#b45309; font-weight:700; font-size:0.85rem;">⏳ Chờ chấm</span>`;
                 correctDisplay = `<span style="color:#b45309; font-style:italic;">(Chờ chấm)</span>`;
             } else {
+                const maxSc = r.max_score || 80;
                 let scoreColor = 'var(--success)';
-                if(r.score < 5.0) scoreColor = 'var(--danger)';
-                else if(r.score < 7.0) scoreColor = 'var(--warning)';
-                scoreDisplay = `<span style="font-size:1.1rem; font-weight:800; color:${scoreColor};">${r.score}</span>`;
+                const pct = (r.score / maxSc) * 100;
+                if(pct < 50.0) scoreColor = 'var(--danger)';
+                else if(pct < 70.0) scoreColor = 'var(--warning)';
+                scoreDisplay = `<span style="font-size:1.1rem; font-weight:800; color:${scoreColor};">${r.score} <small style="font-size:0.8rem; font-weight:600; color:#64748b;">/ ${maxSc}</small></span>`;
                 correctDisplay = `${r.correct_count ?? 0} / ${r.total_questions}`;
             }
 
@@ -3904,10 +4017,16 @@
         const mcQs = allQs.filter(q => q.question_type !== 'essay');
         const essayQs = allQs.filter(q => q.question_type === 'essay');
 
+        const totMax = data.max_score || (data.exam?.total_max_score) || 80;
+        const scoreLabelEl = document.getElementById('audit-score-label');
+        if (scoreLabelEl) {
+            scoreLabelEl.innerText = `Điểm số (Thang ${totMax}):`;
+        }
+
         if (isPending) {
             scoreEl.innerHTML = '<span style="color:#d97706; font-size:1.5rem; font-weight:800;">⏳ Chờ chấm</span>';
         } else {
-            scoreEl.innerText = data.score;
+            scoreEl.innerText = `${data.score} / ${totMax}`;
         }
 
         const mcCount = data.mc_count !== undefined ? data.mc_count : mcQs.length;
@@ -3953,8 +4072,6 @@
         const container = document.getElementById('audit-questions-container');
         container.innerHTML = '';
         
-        const totalQ = list.length || 1;
-        const ptsPerQ = (10.0 / totalQ).toFixed(2);
         let hasManualGrading = false;
         const isAdmin = Boolean(currentUser && currentUser.is_admin);
 
@@ -3970,17 +4087,20 @@
             card.className = isAnswerHidden ? 'audit-q-card' : `audit-q-card is-${q.status}`;
             card.dataset.status = q.status;
 
-            let stBadge = `<span class="badge badge-success">✓ Đúng (+${q.earned_score !== undefined ? q.earned_score : ptsPerQ} đ)</span>`;
+            const qWeight = (q.score_weight !== undefined && q.score_weight !== null) ? q.score_weight : 1.0;
+            const earnedPts = (q.earned_score !== undefined && q.earned_score !== null) ? q.earned_score : (q.points !== undefined ? q.points : qWeight);
+
+            let stBadge = `<span class="badge badge-success">✓ Đúng (+${earnedPts} đ)</span>`;
             if (isAnswerHidden) {
                 stBadge = '<span class="badge badge-neutral" style="background:#e2e8f0; color:#475569;">🔒 Đáp án đang ẩn</span>';
             } else if (q.status === 'graded') {
-                stBadge = `<span class="badge badge-success">✓ Đã chấm (${q.essay_score ?? 0} đ)</span>`;
+                stBadge = `<span class="badge badge-success">✓ Đã chấm (${q.essay_score ?? earnedPts} đ)</span>`;
                 hasManualGrading = true;
             } else if (q.status === 'pending_grading' || needsManual) {
                 stBadge = '<span class="badge" style="background:#fef3c7; color:#b45309; font-weight:700;">⏳ Chờ chấm điểm</span>';
                 hasManualGrading = true;
             } else if (q.status === 'partial') {
-                stBadge = `<span class="badge" style="background:#fef3c7; color:#b45309; font-weight:700;">⚠️ Đúng 1 phần (+${q.earned_score ?? 0} đ)</span>`;
+                stBadge = `<span class="badge" style="background:#fef3c7; color:#b45309; font-weight:700;">⚠️ Đúng 1 phần (+${earnedPts} đ)</span>`;
             } else if (q.status === 'incorrect') {
                 stBadge = '<span class="badge badge-danger">✗ Sai (0 đ)</span>';
             } else if (q.status === 'unanswered') {
