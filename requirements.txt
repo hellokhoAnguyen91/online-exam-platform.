@@ -12,3 +12,5 @@ python-jose[cryptography]
 httpx
 reportlab
 pillow
+xlrd>=2.0.1
+lxml

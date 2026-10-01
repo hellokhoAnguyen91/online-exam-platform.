@@ -598,10 +598,29 @@ def parse_student_file(contents: bytes, filename: str) -> Dict[str, Any]:
     # 1. EXCEL (.xlsx, .xls)
     if fn_lower.endswith(".xlsx") or fn_lower.endswith(".xls"):
         df_raw = None
+        last_err = None
+        # Try automatic engine
         try:
             df_raw = pd.read_excel(io.BytesIO(contents), header=None, dtype=str)
-        except Exception:
-            # Fallback 1: Many Vietnamese university portals export HTML tables with .xls extension
+        except Exception as e:
+            last_err = e
+            
+        # Fallback 1: Explicitly try openpyxl (in case .xls is actually xlsx)
+        if df_raw is None:
+            try:
+                df_raw = pd.read_excel(io.BytesIO(contents), header=None, dtype=str, engine="openpyxl")
+            except Exception:
+                pass
+                
+        # Fallback 2: Explicitly try xlrd (in case .xlsx is actually xls)
+        if df_raw is None:
+            try:
+                df_raw = pd.read_excel(io.BytesIO(contents), header=None, dtype=str, engine="xlrd")
+            except Exception:
+                pass
+
+        # Fallback 3: Many Vietnamese university portals export HTML tables with .xls extension
+        if df_raw is None:
             try:
                 tables = pd.read_html(io.BytesIO(contents), header=None)
                 if tables:
@@ -609,22 +628,23 @@ def parse_student_file(contents: bytes, filename: str) -> Dict[str, Any]:
             except Exception:
                 pass
             
-            # Fallback 2: Tab-separated or CSV with .xls extension
-            if df_raw is None:
-                for enc in ["utf-8-sig", "utf-8", "cp1258", "cp1252", "latin1"]:
-                    for sep in ["\t", ",", ";"]:
-                        try:
-                            df_try = pd.read_csv(io.BytesIO(contents), header=None, encoding=enc, sep=sep, dtype=str)
-                            if df_try.shape[1] > 1:
-                                df_raw = df_try
-                                break
-                        except Exception:
-                            continue
-                    if df_raw is not None:
-                        break
-                        
+        # Fallback 4: Tab-separated or CSV with .xls extension
         if df_raw is None:
-            raise ValueError(f"Không thể đọc file Excel '{filename}'. Vui lòng kiểm tra lại định dạng tệp.")
+            for enc in ["utf-8-sig", "utf-8", "cp1258", "cp1252", "latin1"]:
+                for sep in ["\t", ",", ";"]:
+                    try:
+                        df_try = pd.read_csv(io.BytesIO(contents), header=None, encoding=enc, sep=sep, dtype=str)
+                        if df_try.shape[1] > 1:
+                            df_raw = df_try
+                            break
+                    except Exception:
+                        continue
+                if df_raw is not None:
+                    break
+                    
+        if df_raw is None:
+            err_msg = f": {str(last_err)}" if last_err else ""
+            raise ValueError(f"Không thể đọc file Excel '{filename}'{err_msg}. Vui lòng kiểm tra lại định dạng tệp.")
             
         matrix = df_raw.values.tolist()
         header_row_idx, headers = find_header_row_in_matrix(matrix)
