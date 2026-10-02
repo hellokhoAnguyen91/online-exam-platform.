@@ -5,6 +5,7 @@ import random
 import io
 import re
 import asyncio
+import base64
 from typing import List, Optional, Dict, Any
 
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, status, Request, Query
@@ -97,8 +98,11 @@ class ExamCreate(BaseModel):
     close_time: Optional[str] = None
     allow_review: bool = True
     shuffle_questions: bool = True
-    mc_max_score: float = 50.0
-    essay_max_score: float = 30.0
+    mc_max_score: float = 7.0
+    essay_max_score: float = 3.0
+
+class RescueImportPayload(BaseModel):
+    rescue_code: str
 
 class ExamUpdate(BaseModel):
     title: Optional[str] = None
@@ -200,6 +204,22 @@ def get_current_user(
     if user is None:
         raise credentials_exception
     return user
+
+def utc_now() -> datetime.datetime:
+    """Timezone-aware UTC current timestamp."""
+    return datetime.datetime.now(datetime.timezone.utc)
+
+def utc_now_naive() -> datetime.datetime:
+    """Naive UTC timestamp for database persistence."""
+    return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+
+def to_utc_dt(dt: Optional[datetime.datetime]) -> Optional[datetime.datetime]:
+    """Convert any naive or aware datetime to timezone-aware UTC datetime."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=datetime.timezone.utc)
+    return dt.astimezone(datetime.timezone.utc)
 
 def parse_iso_dt(dt_str: Optional[str]) -> Optional[datetime.datetime]:
     if not dt_str:
@@ -348,9 +368,9 @@ def list_exams(db: Session = Depends(get_db), current_user: User = Depends(get_c
             "archived_at": ex.archived_at.isoformat() if ex.archived_at else None,
             "allow_review": ex.allow_review,
             "shuffle_questions": ex.shuffle_questions,
-            "mc_max_score": getattr(ex, 'mc_max_score', 50.0) if getattr(ex, 'mc_max_score', None) is not None else 50.0,
-            "essay_max_score": getattr(ex, 'essay_max_score', 30.0) if getattr(ex, 'essay_max_score', None) is not None else 30.0,
-            "total_max_score": round((getattr(ex, 'mc_max_score', 50.0) if getattr(ex, 'mc_max_score', None) is not None else 50.0) + (getattr(ex, 'essay_max_score', 30.0) if getattr(ex, 'essay_max_score', None) is not None else 30.0), 2),
+            "mc_max_score": getattr(ex, 'mc_max_score', 7.0) if getattr(ex, 'mc_max_score', None) is not None else 7.0,
+            "essay_max_score": getattr(ex, 'essay_max_score', 3.0) if getattr(ex, 'essay_max_score', None) is not None else 3.0,
+            "total_max_score": round((getattr(ex, 'mc_max_score', 7.0) if getattr(ex, 'mc_max_score', None) is not None else 7.0) + (getattr(ex, 'essay_max_score', 3.0) if getattr(ex, 'essay_max_score', None) is not None else 3.0), 2),
             "created_at": ex.created_at.strftime("%Y-%m-%d %H:%M:%S") if ex.created_at else None,
             "question_count": q_count,
             "candidate_count": candidate_count,
@@ -374,8 +394,8 @@ def create_exam(payload: ExamCreate, db: Session = Depends(get_db), current_user
         close_time=parse_iso_dt(payload.close_time),
         allow_review=payload.allow_review,
         shuffle_questions=payload.shuffle_questions,
-        mc_max_score=payload.mc_max_score if payload.mc_max_score is not None else 50.0,
-        essay_max_score=payload.essay_max_score if payload.essay_max_score is not None else 30.0,
+        mc_max_score=payload.mc_max_score if payload.mc_max_score is not None else 7.0,
+        essay_max_score=payload.essay_max_score if payload.essay_max_score is not None else 3.0,
         is_active=False,
         is_archived=False,
         created_at=datetime.datetime.now()
@@ -1041,37 +1061,42 @@ def list_students(exam_id: Optional[int] = None, db: Session = Depends(get_db), 
         if active_exam:
             target_exam_id = active_exam.id
             
-    students = db.query(User).filter(User.is_admin == False).order_by(
-        User.order_index.asc(),
-        User.id.asc()
-    ).all()
+    query = (
+        db.query(
+            User.id,
+            User.username,
+            User.fullname,
+            User.dob,
+            User.class_name,
+            User.order_index,
+            ExamResult.id.label("result_id"),
+            ExamResult.status.label("exam_status"),
+            ExamResult.score.label("score"),
+            ExamResult.submit_time.label("submit_time"),
+        )
+        .outerjoin(
+            ExamResult,
+            (ExamResult.user_id == User.id) & (ExamResult.exam_id == target_exam_id)
+        )
+        .filter(User.is_admin == False)
+        .order_by(User.order_index.asc(), User.id.asc())
+    )
+    rows = query.all()
+
     out = []
-    for s in students:
-        res = None
-        if target_exam_id:
-            res = db.query(ExamResult).filter(ExamResult.exam_id == target_exam_id, ExamResult.user_id == s.id).first()
-        
-        exam_status = "not_started"
-        score = None
-        submit_time = None
-        result_id = None
-        if res:
-            exam_status = res.status
-            score = res.score
-            submit_time = res.submit_time.strftime("%H:%M:%S %d/%m/%Y") if res.submit_time else None
-            result_id = res.id
-            
+    for r in rows:
+        st_time = r.submit_time.strftime("%H:%M:%S %d/%m/%Y") if r.submit_time else None
         out.append({
-            "id": s.id,
-            "username": s.username,
-            "fullname": s.fullname,
-            "dob": s.dob or "",
-            "class_name": s.class_name or "",
-            "order_index": s.order_index or 0,
-            "exam_status": exam_status,
-            "score": score,
-            "submit_time": submit_time,
-            "result_id": result_id
+            "id": r.id,
+            "username": r.username,
+            "fullname": r.fullname,
+            "dob": r.dob or "",
+            "class_name": r.class_name or "",
+            "order_index": r.order_index or 0,
+            "exam_status": r.exam_status or "not_started",
+            "score": r.score,
+            "submit_time": st_time,
+            "result_id": r.result_id
         })
     return out
 
@@ -1100,24 +1125,24 @@ def calculate_exam_score(audit_details: list, q_dict: dict, exam: Optional[Exam]
     essay_items = [d for d in audit_details if q_dict.get(d.get("id")) and q_dict[d["id"]].question_type == "essay"]
     
     # 1. Effective max points from exam config
-    cfg_mc = float(getattr(exam, 'mc_max_score', 50.0) if exam and getattr(exam, 'mc_max_score', None) is not None else 50.0)
-    cfg_essay = float(getattr(exam, 'essay_max_score', 30.0) if exam and getattr(exam, 'essay_max_score', None) is not None else 30.0)
+    cfg_mc = float(getattr(exam, 'mc_max_score', 7.0) if exam and getattr(exam, 'mc_max_score', None) is not None else 7.0)
+    cfg_essay = float(getattr(exam, 'essay_max_score', 3.0) if exam and getattr(exam, 'essay_max_score', None) is not None else 3.0)
     
     if not essay_items:
-        eff_mc_max = cfg_mc if cfg_mc > 0 else (cfg_mc + cfg_essay if (cfg_mc + cfg_essay) > 0 else 80.0)
+        eff_mc_max = (cfg_mc + cfg_essay) if (cfg_mc + cfg_essay) > 0 else 10.0
         eff_essay_max = 0.0
     elif not mc_items:
         eff_mc_max = 0.0
-        eff_essay_max = cfg_essay if cfg_essay > 0 else (cfg_mc + cfg_essay if (cfg_mc + cfg_essay) > 0 else 80.0)
+        eff_essay_max = (cfg_mc + cfg_essay) if (cfg_mc + cfg_essay) > 0 else 10.0
     else:
         eff_mc_max = cfg_mc
         eff_essay_max = cfg_essay
 
     eff_total_max = round(eff_mc_max + eff_essay_max, 2)
     if eff_total_max <= 0:
-        eff_mc_max = 50.0
-        eff_essay_max = 30.0
-        eff_total_max = 80.0
+        eff_mc_max = 7.0
+        eff_essay_max = 3.0
+        eff_total_max = 10.0
 
     # 2. Scale factor for MC
     sum_mc_weights = sum(float(q_dict[d["id"]].score_weight or 1.0) for d in mc_items)
@@ -1225,9 +1250,9 @@ def score_essay(result_id: int, payload: EssayScoreUpdate, db: Session = Depends
         score_val = payload.scores.get(str(q_id)) if str(q_id) in payload.scores else payload.scores.get(q_id)
         if score_val is not None:
             score = float(score_val)
-            eff_max_w = round(float(q.score_weight or 1.0) * essay_scale, 2)
-            if score < 0.0 or score > (eff_max_w + 1e-4):
-                raise HTTPException(status_code=400, detail=f"Điểm số ({score}) không hợp lệ! Điểm phải nằm trong khoảng từ 0.0 đến {eff_max_w}")
+            max_w = float(q.score_weight or 1.0)
+            if score < 0.0 or score > (max_w + 1e-4):
+                raise HTTPException(status_code=400, detail=f"Điểm số ({score}) không hợp lệ! Điểm phải nằm trong khoảng từ 0.0 đến {max_w}")
             detail["essay_score"] = score
             detail["status"] = "graded"
 
@@ -1329,13 +1354,6 @@ def auto_close_exam_result(result: ExamResult, db: Session, exam: Optional[Exam]
         audit_details.append({
             "q_idx": idx + 1,
             "id": q.id,
-            "content": q.content,
-            "option_a": q.option_a,
-            "option_b": q.option_b,
-            "option_c": q.option_c,
-            "option_d": q.option_d,
-            "option_e": getattr(q, 'option_e', '') or '',
-            "option_f": getattr(q, 'option_f', '') or '',
             "question_type": q.question_type or 'multiple_choice',
             "score_weight": weight,
             "selected": ans,
@@ -1354,7 +1372,8 @@ def auto_close_exam_result(result: ExamResult, db: Session, exam: Optional[Exam]
     result.total_questions = len(q_ids)
     result.answers_detail = json.dumps(audit_details, ensure_ascii=False)
     result.duration_seconds = dur_limit_sec
-    result.submit_time = result.start_time + datetime.timedelta(seconds=dur_limit_sec)
+    st_utc = to_utc_dt(result.start_time) or utc_now()
+    result.submit_time = (st_utc + datetime.timedelta(seconds=dur_limit_sec)).replace(tzinfo=None)
     result.status = "submitted"
     db.commit()
     return result
@@ -1363,20 +1382,28 @@ def sync_expired_sessions(db: Session, exam_id: Optional[int] = None):
     """Scan and automatically finalize any student session that has exceeded exam duration.
     Only processes in-progress sessions; does not modify already-submitted sessions.
     """
-    now = datetime.datetime.now()
+    now_utc = utc_now()
     # Auto-close in-progress sessions that have timed out
     query = db.query(ExamResult).filter(ExamResult.status == "in_progress")
     if exam_id:
         query = query.filter(ExamResult.exam_id == exam_id)
     in_progress_results = query.all()
     
+    exam_cache = {}
     for r in in_progress_results:
-        exam = db.query(Exam).filter(Exam.id == r.exam_id).first()
+        if r.exam_id not in exam_cache:
+            exam_cache[r.exam_id] = db.query(Exam).filter(Exam.id == r.exam_id).first()
+        exam = exam_cache[r.exam_id]
         if not exam:
             continue
         duration_sec = exam.duration_minutes * 60
         if r.start_time:
-            elapsed = (now - r.start_time).total_seconds()
+            st = to_utc_dt(r.start_time)
+            if st > now_utc:
+                st = now_utc
+                r.start_time = utc_now_naive()
+                db.commit()
+            elapsed = (now_utc - st).total_seconds()
             if elapsed >= duration_sec:
                 auto_close_exam_result(r, db, exam)
 
@@ -1394,7 +1421,24 @@ def get_results(exam_id: Optional[int] = None, db: Session = Depends(get_db), cu
     # Sync and auto-close any sessions that have exceeded time limit
     sync_expired_sessions(db, target_exam_id)
             
-    query = db.query(ExamResult)
+    query = (
+        db.query(
+            ExamResult.id,
+            ExamResult.exam_id,
+            ExamResult.user_id,
+            ExamResult.score,
+            ExamResult.max_score,
+            ExamResult.correct_count,
+            ExamResult.total_questions,
+            ExamResult.duration_seconds,
+            ExamResult.start_time,
+            ExamResult.submit_time,
+            ExamResult.status,
+            User.username,
+            User.fullname,
+        )
+        .outerjoin(User, User.id == ExamResult.user_id)
+    )
     if target_exam_id:
         query = query.filter(ExamResult.exam_id == target_exam_id)
         
@@ -1410,7 +1454,6 @@ def get_results(exam_id: Optional[int] = None, db: Session = Depends(get_db), cu
     
     out = []
     for r in results:
-        user = db.query(User).filter(User.id == r.user_id).first()
         duration_fmt = ""
         if r.duration_seconds:
             m = r.duration_seconds // 60
@@ -1421,8 +1464,8 @@ def get_results(exam_id: Optional[int] = None, db: Session = Depends(get_db), cu
             "id": r.id,
             "exam_id": r.exam_id,
             "user_id": r.user_id,
-            "username": user.username if user else "",
-            "fullname": user.fullname if user else "",
+            "username": r.username or "",
+            "fullname": r.fullname or "",
             "score": r.score,
             "max_score": r.max_score or 10.0,
             "correct_count": r.correct_count,
@@ -1467,14 +1510,14 @@ def get_result_detail(result_id: int, db: Session = Depends(get_db), current_use
         except Exception:
             audit_questions = []
             
+    q_ids = json.loads(res.questions) if res.questions else [item.get("id") for item in audit_questions if item.get("id")]
+    questions = db.query(Question).filter(Question.id.in_(q_ids)).all() if q_ids else []
+    q_dict = {q.id: q for q in questions}
+
     # If answers_detail not present (e.g. legacy result), construct from raw answers & questions
     if not audit_questions and res.questions:
         try:
-            q_ids = json.loads(res.questions)
             raw_answers = json.loads(res.answers) if res.answers else {}
-            questions = db.query(Question).filter(Question.id.in_(q_ids)).all()
-            q_dict = {q.id: q for q in questions}
-            
             for idx, qid in enumerate(q_ids):
                 q = q_dict.get(qid)
                 if not q:
@@ -1485,13 +1528,6 @@ def get_result_detail(result_id: int, db: Session = Depends(get_db), current_use
                 audit_questions.append({
                     "q_idx": idx + 1,
                     "id": q.id,
-                    "content": q.content,
-                    "option_a": q.option_a,
-                    "option_b": q.option_b,
-                    "option_c": q.option_c,
-                    "option_d": q.option_d,
-                    "option_e": getattr(q, 'option_e', '') or '',
-                    "option_f": getattr(q, 'option_f', '') or '',
                     "question_type": q.question_type or 'multiple_choice',
                     "score_weight": q.score_weight or 1.0,
                     "selected": selected,
@@ -1501,6 +1537,30 @@ def get_result_detail(result_id: int, db: Session = Depends(get_db), current_use
                 })
         except Exception as e:
             print(f"Error rebuilding audit detail: {e}")
+
+    for q in audit_questions:
+        q_obj = q_dict.get(q.get("id"))
+        if q_obj:
+            if not q.get("content"):
+                q["content"] = q_obj.content
+            if not q.get("option_a"):
+                q["option_a"] = q_obj.option_a
+            if not q.get("option_b"):
+                q["option_b"] = q_obj.option_b
+            if not q.get("option_c"):
+                q["option_c"] = q_obj.option_c
+            if not q.get("option_d"):
+                q["option_d"] = q_obj.option_d
+            if not q.get("option_e"):
+                q["option_e"] = getattr(q_obj, 'option_e', '') or ''
+            if not q.get("option_f"):
+                q["option_f"] = getattr(q_obj, 'option_f', '') or ''
+            if not q.get("explanation"):
+                q["explanation"] = getattr(q_obj, 'explanation', '') or ''
+            if not q.get("question_type"):
+                q["question_type"] = getattr(q_obj, 'question_type', 'multiple_choice')
+            if not q.get("correct"):
+                q["correct"] = q_obj.correct_option
 
     duration_str = ""
     if res.duration_seconds:
@@ -1521,7 +1581,7 @@ def get_result_detail(result_id: int, db: Session = Depends(get_db), current_use
         
     q_dict_audit = {}
     for q in audit_questions:
-        q_obj = db.query(Question).filter(Question.id == q.get("id")).first()
+        q_obj = q_dict.get(q.get("id"))
         if q_obj:
             q_dict_audit[q["id"]] = q_obj
         else:
@@ -1558,6 +1618,208 @@ def get_result_detail(result_id: int, db: Session = Depends(get_db), current_use
         "essay_max_score": scoring["essay_max_score"],
         "has_pending_essay": scoring["has_pending"],
         "questions": audit_questions
+    }
+
+@app.post("/api/admin/rescue_import")
+def rescue_import_exam_result(
+    payload: RescueImportPayload,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Emergency Black Box Rescue:
+    Restores and grades a student's submission from an encrypted/base64 rescue code
+    copied from the candidate's browser during a network crash or 502 container restart.
+    """
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Chỉ quản trị viên mới có quyền phục hồi bài làm")
+
+    code = (payload.rescue_code or "").strip()
+    if not code:
+        raise HTTPException(status_code=400, detail="Mã cứu hộ không được để trống")
+
+    if code.startswith("HCMUTE-RESCUE:"):
+        code = code[len("HCMUTE-RESCUE:"):].strip()
+
+    raw_json = None
+    try:
+        decoded = base64.b64decode(code).decode('utf-8')
+        raw_json = json.loads(decoded)
+    except Exception:
+        try:
+            raw_json = json.loads(code)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Mã cứu hộ không hợp lệ hoặc bị lỗi định dạng!")
+
+    if not isinstance(raw_json, dict):
+        raise HTTPException(status_code=400, detail="Dữ liệu mã cứu hộ không đúng cấu trúc đối tượng JSON")
+
+    exam_id = raw_json.get("exam_id")
+    user_id = raw_json.get("user_id")
+    username = raw_json.get("username")
+    answers = raw_json.get("answers") or {}
+
+    student = None
+    if user_id:
+        student = db.query(User).filter(User.id == user_id).first()
+    if not student and username:
+        student = db.query(User).filter(User.username == str(username).strip()).first()
+
+    if not student:
+        raise HTTPException(status_code=404, detail=f"Không tìm thấy thí sinh (MSSV: {username or user_id}) trong hệ thống!")
+
+    exam = None
+    if exam_id:
+        exam = db.query(Exam).filter(Exam.id == exam_id).first()
+    if not exam:
+        exam = db.query(Exam).filter(Exam.is_active == True, Exam.is_archived == False).first()
+    if not exam:
+        raise HTTPException(status_code=404, detail="Không tìm thấy kỳ thi tương ứng trên hệ thống!")
+
+    # Find or create exam result
+    result = db.query(ExamResult).filter(
+        ExamResult.user_id == student.id,
+        ExamResult.exam_id == exam.id
+    ).order_by(desc(ExamResult.id)).first()
+
+    if not result:
+        questions = db.query(Question).filter(Question.exam_id == exam.id).order_by(Question.id.asc()).all()
+        mc_qs = [q.id for q in questions if q.question_type != 'essay']
+        essay_qs = [q.id for q in questions if q.question_type == 'essay']
+        q_ids = mc_qs + essay_qs
+        result = ExamResult(
+            exam_id=exam.id,
+            user_id=student.id,
+            start_time=utc_now_naive(),
+            questions=json.dumps(q_ids),
+            total_questions=len(q_ids),
+            status="in_progress"
+        )
+        db.add(result)
+        db.commit()
+        db.refresh(result)
+
+    q_ids = json.loads(result.questions) if result.questions else []
+    if not q_ids:
+        questions = db.query(Question).filter(Question.exam_id == exam.id).order_by(Question.id.asc()).all()
+        mc_qs = [q.id for q in questions if q.question_type != 'essay']
+        essay_qs = [q.id for q in questions if q.question_type == 'essay']
+        q_ids = mc_qs + essay_qs
+        result.questions = json.dumps(q_ids)
+        result.total_questions = len(q_ids)
+
+    questions = db.query(Question).filter(Question.id.in_(q_ids)).all()
+    q_dict = {q.id: q for q in questions}
+
+    mc_ids = [qid for qid in q_ids if q_dict.get(qid) and q_dict[qid].question_type != 'essay']
+    essay_ids = [qid for qid in q_ids if q_dict.get(qid) and q_dict[qid].question_type == 'essay']
+    ordered_q_ids = mc_ids + essay_ids if (mc_ids or essay_ids) else q_ids
+
+    correct_count = 0
+    audit_details = []
+
+    for idx, qid in enumerate(ordered_q_ids):
+        q = q_dict.get(qid)
+        if not q:
+            continue
+        selected = answers.get(str(qid)) or answers.get(qid)
+        if isinstance(selected, (list, tuple, set)):
+            sel_str = ",".join(str(x).strip() for x in selected if str(x).strip())
+        else:
+            sel_str = str(selected).strip() if selected is not None else ""
+        is_c = False
+        st = "unanswered"
+        weight = q.score_weight or 1.0
+        earned_score = 0.0
+
+        if q.question_type == "essay":
+            if sel_str:
+                st = "pending_grading"
+            else:
+                st = "unanswered"
+                earned_score = 0.0
+        else:
+            correct_val = (q.correct_option or "").strip()
+            if not correct_val:
+                is_c = False
+                st = "unanswered" if not sel_str else "pending_grading"
+            elif q.question_type == "multi_select":
+                if isinstance(selected, (list, tuple, set)):
+                    sel_set = {str(x).strip().upper() for x in selected if str(x).strip()}
+                elif isinstance(selected, str):
+                    sel_set = set(re.findall(r'[A-Za-z]', selected.upper())) if selected.strip() else set()
+                else:
+                    sel_set = set()
+                corr_set = set(re.findall(r'[A-Za-z]', correct_val.upper())) if correct_val else set()
+                if not sel_set:
+                    st = "unanswered"
+                    is_c = False
+                    earned_score = 0.0
+                else:
+                    num_corr = len(sel_set & corr_set)
+                    num_wrong = len(sel_set - corr_set)
+                    total_corr = len(corr_set)
+                    fraction = max(0.0, (num_corr - num_wrong) / total_corr) if total_corr > 0 else 0.0
+                    earned_score = fraction * weight
+                    if fraction >= 1.0:
+                        is_c = True
+                        st = "correct"
+                    elif fraction > 0.0:
+                        is_c = False
+                        st = "partial"
+                    else:
+                        is_c = False
+                        st = "incorrect"
+            else:
+                if isinstance(selected, (list, tuple, set)):
+                    chosen_opt = str(list(selected)[0]).strip().upper() if selected else ""
+                else:
+                    chosen_opt = str(selected).strip().upper() if selected is not None else ""
+                is_c = bool(chosen_opt and chosen_opt == correct_val.upper())
+                st = "correct" if is_c else ("incorrect" if chosen_opt else "unanswered")
+                earned_score = weight if is_c else 0.0
+
+            if is_c:
+                correct_count += 1
+
+        audit_details.append({
+            "q_idx": idx + 1,
+            "id": q.id,
+            "question_type": q.question_type or 'multiple_choice',
+            "score_weight": weight,
+            "selected": selected,
+            "correct": q.correct_option,
+            "is_correct": is_c,
+            "status": st,
+            "earned_score": round(earned_score, 4)
+        })
+
+    scoring = calculate_exam_score(audit_details, q_dict, exam)
+    result.score = scoring["score"]
+    result.answers = json.dumps(answers)
+    result.answers_detail = json.dumps(audit_details, ensure_ascii=False)
+    result.max_score = scoring["max_score"]
+    result.correct_count = scoring["correct_count"]
+    result.total_questions = len(q_ids)
+    if not result.submit_time:
+        result.submit_time = utc_now_naive()
+    if not result.duration_seconds:
+        st_utc = to_utc_dt(result.start_time) or utc_now()
+        sub_utc = to_utc_dt(result.submit_time) or utc_now()
+        result.duration_seconds = min(exam.duration_minutes * 60, max(0, int((sub_utc - st_utc).total_seconds())))
+    result.status = "submitted"
+    db.commit()
+
+    return {
+        "status": "success",
+        "message": f"Đã phục hồi thành công bài thi cho thí sinh {student.fullname} ({student.username})!",
+        "result_id": result.id,
+        "student": student.fullname,
+        "mssv": student.username,
+        "score": result.score,
+        "max_score": result.max_score,
+        "correct_count": result.correct_count,
+        "total_questions": result.total_questions
     }
 
 @app.get("/api/admin/results/export")
@@ -1693,12 +1955,13 @@ def export_single_result_pdf(
         except Exception:
             audit_questions = []
             
+    q_ids = json.loads(res.questions) if res.questions else [item.get("id") for item in audit_questions if item.get("id")]
+    questions = db.query(Question).filter(Question.id.in_(q_ids)).all() if q_ids else []
+    q_dict = {q.id: q for q in questions}
+
     if not audit_questions and res.questions:
         try:
-            q_ids = json.loads(res.questions) if isinstance(res.questions, str) else res.questions
             raw_answers = json.loads(res.answers) if (res.answers and isinstance(res.answers, str)) else (res.answers or {})
-            questions = db.query(Question).filter(Question.id.in_(q_ids)).all()
-            q_dict = {q.id: q for q in questions}
             for q_pos, qid in enumerate(q_ids):
                 q = q_dict.get(qid)
                 if not q:
@@ -1721,6 +1984,28 @@ def export_single_result_pdf(
                 })
         except Exception as e:
             print(f"Error rebuilding audit: {e}")
+    else:
+        for item in audit_questions:
+            q_obj = q_dict.get(item.get("id"))
+            if q_obj:
+                if not item.get("content"):
+                    item["content"] = q_obj.content
+                if not item.get("option_a"):
+                    item["option_a"] = q_obj.option_a
+                if not item.get("option_b"):
+                    item["option_b"] = q_obj.option_b
+                if not item.get("option_c"):
+                    item["option_c"] = q_obj.option_c
+                if not item.get("option_d"):
+                    item["option_d"] = q_obj.option_d
+                if not item.get("option_e"):
+                    item["option_e"] = getattr(q_obj, 'option_e', '') or ''
+                if not item.get("option_f"):
+                    item["option_f"] = getattr(q_obj, 'option_f', '') or ''
+                if not item.get("question_type"):
+                    item["question_type"] = q_obj.question_type or 'multiple_choice'
+                if not item.get("correct"):
+                    item["correct"] = q_obj.correct_option
 
     dur_sec = res.duration_seconds or 0
     dur_str = f"{dur_sec // 60}p {dur_sec % 60:02d}s" if dur_sec > 0 else "-"
@@ -1821,7 +2106,8 @@ def get_exam(request: Request, db: Session = Depends(get_db), current_user: User
     if current_user.is_admin:
         raise HTTPException(status_code=400, detail="Tài khoản quản trị viên không tham gia làm bài thi.")
         
-    now = datetime.datetime.now()
+    now_utc = utc_now()
+    now_naive = utc_now_naive()
     
     # 1. Prioritize any existing in_progress session for this student so F5 does not re-roll questions or create duplicate
     active_exam = db.query(Exam).filter(Exam.is_active == True, Exam.is_archived == False).order_by(desc(Exam.id)).first()
@@ -1840,13 +2126,25 @@ def get_exam(request: Request, db: Session = Depends(get_db), current_user: User
             ExamResult.exam_id == active_exam.id
         ).order_by(desc(ExamResult.start_time)).first()
 
-    open_t = active_exam.open_time.replace(tzinfo=None) if (active_exam.open_time and active_exam.open_time.tzinfo) else active_exam.open_time
-    close_t = active_exam.close_time.replace(tzinfo=None) if (active_exam.close_time and active_exam.close_time.tzinfo) else active_exam.close_time
+    open_t = active_exam.open_time
+    close_t = active_exam.close_time
+    now_local = datetime.datetime.now()
 
-    if open_t and now < open_t:
-        raise HTTPException(status_code=400, detail=f"Kỳ thi chưa mở. Thời gian mở thi: {open_t.strftime('%H:%M %d/%m/%Y')}")
-    if close_t and now > close_t:
-        raise HTTPException(status_code=400, detail=f"Kỳ thi đã kết thúc vào lúc {close_t.strftime('%H:%M %d/%m/%Y')}")
+    if open_t:
+        if open_t.tzinfo is not None:
+            if now_utc < open_t:
+                raise HTTPException(status_code=400, detail=f"Kỳ thi chưa mở. Thời gian mở thi: {open_t.strftime('%H:%M %d/%m/%Y')}")
+        else:
+            if now_local < open_t and now_naive < open_t:
+                raise HTTPException(status_code=400, detail=f"Kỳ thi chưa mở. Thời gian mở thi: {open_t.strftime('%H:%M %d/%m/%Y')}")
+
+    if close_t:
+        if close_t.tzinfo is not None:
+            if now_utc > close_t:
+                raise HTTPException(status_code=400, detail=f"Kỳ thi đã kết thúc vào lúc {close_t.strftime('%H:%M %d/%m/%Y')}")
+        else:
+            if now_local > close_t and now_naive > close_t:
+                raise HTTPException(status_code=400, detail=f"Kỳ thi đã kết thúc vào lúc {close_t.strftime('%H:%M %d/%m/%Y')}")
         
     cfg_mc = float(getattr(active_exam, 'mc_max_score', 50.0) if getattr(active_exam, 'mc_max_score', None) is not None else 50.0)
     cfg_essay = float(getattr(active_exam, 'essay_max_score', 30.0) if getattr(active_exam, 'essay_max_score', None) is not None else 30.0)
@@ -1911,7 +2209,7 @@ def get_exam(request: Request, db: Session = Depends(get_db), current_user: User
             result = ExamResult(
                 exam_id=active_exam.id,
                 user_id=current_user.id,
-                start_time=now,
+                start_time=now_naive,
                 questions=json.dumps(q_ids),
                 total_questions=num_to_take,
                 client_ip=client_ip,
@@ -1971,9 +2269,19 @@ def get_exam(request: Request, db: Session = Depends(get_db), current_user: User
                 "score_weight": eff_w
             })
             
-    # Calculate time left
-    elapsed = (datetime.datetime.now() - result.start_time).total_seconds()
-    time_left = max(0, active_exam.duration_minutes * 60 - elapsed)
+    # Calculate time left using UTC to avoid timezone mismatches
+    now_utc = utc_now()
+    st = to_utc_dt(result.start_time) or now_utc
+    if st > now_utc:
+        st = now_utc
+        result.start_time = utc_now_naive()
+        db.commit()
+
+    duration_sec = active_exam.duration_minutes * 60
+    end_time_utc = st + datetime.timedelta(seconds=duration_sec)
+    time_left = max(0, int((end_time_utc - now_utc).total_seconds()))
+    server_now_utc = now_utc.isoformat()
+    end_time_utc_str = end_time_utc.isoformat()
     
     # Auto submit if time completely ran out
     if time_left <= 0:
@@ -1987,7 +2295,10 @@ def get_exam(request: Request, db: Session = Depends(get_db), current_user: User
             "total_questions": result.total_questions,
             "allow_review": active_exam.allow_review,
             "exam_title": active_exam.title,
-            "needs_grading": (result.score is None)
+            "needs_grading": (result.score is None),
+            "server_now_utc": server_now_utc,
+            "end_time_utc": end_time_utc_str,
+            "time_left": 0
         }
         
     return {
@@ -2002,6 +2313,8 @@ def get_exam(request: Request, db: Session = Depends(get_db), current_user: User
         "essay_max_score": cfg_essay,
         "total_max_score": tot_max,
         "time_left": int(time_left),
+        "server_now_utc": server_now_utc,
+        "end_time_utc": end_time_utc_str,
         "answers": json.loads(result.answers) if result.answers else {}
     }
 
@@ -2028,10 +2341,11 @@ def save_progress(payload: AnswerPayload, db: Session = Depends(get_db), current
             mc_qs = [q.id for q in questions if q.question_type != 'essay']
             essay_qs = [q.id for q in questions if q.question_type == 'essay']
             q_ids = mc_qs + essay_qs
+            now_utc = utc_now()
             result = ExamResult(
                 exam_id=active_exam.id,
                 user_id=current_user.id,
-                start_time=datetime.datetime.now() - datetime.timedelta(minutes=20),
+                start_time=utc_now_naive() - datetime.timedelta(minutes=20),
                 questions=json.dumps(q_ids),
                 total_questions=len(q_ids),
                 status="in_progress",
@@ -2041,31 +2355,62 @@ def save_progress(payload: AnswerPayload, db: Session = Depends(get_db), current
             db.add(result)
             db.commit()
             db.refresh(result)
-            return {"status": "saved"}
+            st = to_utc_dt(result.start_time) or now_utc
+            duration_limit = active_exam.duration_minutes * 60
+            end_time_utc = st + datetime.timedelta(seconds=duration_limit)
+            time_left = max(0, int((end_time_utc - now_utc).total_seconds()))
+            return {
+                "status": "saved",
+                "server_now_utc": now_utc.isoformat(),
+                "end_time_utc": end_time_utc.isoformat(),
+                "time_left": time_left
+            }
         return {"status": "no_active_session"}
         
     exam = db.query(Exam).filter(Exam.id == result.exam_id).first()
     if not exam:
         return {"status": "no_exam"}
         
+    now_utc = utc_now()
+    st = to_utc_dt(result.start_time) or now_utc
+    if st > now_utc:
+        st = now_utc
+        result.start_time = utc_now_naive()
+        db.commit()
+
+    duration_limit = exam.duration_minutes * 60
+    end_time_utc = st + datetime.timedelta(seconds=duration_limit)
+    time_left = max(0, int((end_time_utc - now_utc).total_seconds()))
+    server_now_utc = now_utc.isoformat()
+    end_time_utc_str = end_time_utc.isoformat()
+
     if result.status == "submitted":
         return {
             "status": "expired",
-            "detail": f"Đã hết thời gian làm bài ({exam.duration_minutes} phút)! Bài thi của bạn đã được hệ thống tự động khóa và nộp điểm."
+            "detail": f"Đã hết thời gian làm bài ({exam.duration_minutes} phút)! Bài thi của bạn đã được hệ thống tự động khóa và nộp điểm.",
+            "server_now_utc": server_now_utc,
+            "end_time_utc": end_time_utc_str,
+            "time_left": 0
         }
         
-    elapsed = (datetime.datetime.now() - result.start_time).total_seconds()
-    duration_limit = exam.duration_minutes * 60
-    if elapsed < duration_limit:
+    if time_left > 0:
         result.answers = json.dumps(payload.answers)
         db.commit()
-        return {"status": "saved"}
+        return {
+            "status": "saved",
+            "server_now_utc": server_now_utc,
+            "end_time_utc": end_time_utc_str,
+            "time_left": time_left
+        }
     else:
         # Time has expired! Auto-finalize and reject any late edits!
         auto_close_exam_result(result, db, exam)
         return {
             "status": "expired",
-            "detail": f"Đã hết thời gian làm bài ({exam.duration_minutes} phút)! Bài thi của bạn đã được hệ thống tự động khóa và nộp điểm."
+            "detail": f"Đã hết thời gian làm bài ({exam.duration_minutes} phút)! Bài thi của bạn đã được hệ thống tự động khóa và nộp điểm.",
+            "server_now_utc": server_now_utc,
+            "end_time_utc": end_time_utc_str,
+            "time_left": 0
         }
 
 @app.post("/api/exam/submit")
@@ -2097,7 +2442,7 @@ def submit_exam(payload: AnswerPayload, db: Session = Depends(get_db), current_u
             result = ExamResult(
                 exam_id=active_exam.id,
                 user_id=current_user.id,
-                start_time=datetime.datetime.now() - datetime.timedelta(minutes=30),
+                start_time=utc_now_naive() - datetime.timedelta(minutes=30),
                 questions=json.dumps(q_ids),
                 total_questions=len(q_ids),
                 status="in_progress",
@@ -2206,13 +2551,6 @@ def submit_exam(payload: AnswerPayload, db: Session = Depends(get_db), current_u
         audit_details.append({
             "q_idx": idx + 1,
             "id": q.id,
-            "content": q.content,
-            "option_a": q.option_a,
-            "option_b": q.option_b,
-            "option_c": q.option_c,
-            "option_d": q.option_d,
-            "option_e": getattr(q, 'option_e', '') or '',
-            "option_f": getattr(q, 'option_f', '') or '',
             "question_type": q.question_type or 'multiple_choice',
             "score_weight": weight,
             "selected": selected,
@@ -2222,15 +2560,16 @@ def submit_exam(payload: AnswerPayload, db: Session = Depends(get_db), current_u
             "earned_score": round(earned_score, 4)
         })
         
-    now = datetime.datetime.now()
-    raw_duration = int((now - result.start_time).total_seconds())
+    now_utc = utc_now()
+    st = to_utc_dt(result.start_time) or now_utc
+    raw_duration = max(0, int((now_utc - st).total_seconds()))
     max_duration_sec = exam.duration_minutes * 60
     if raw_duration >= max_duration_sec:
         duration_sec = max_duration_sec
-        final_submit_time = result.start_time + datetime.timedelta(seconds=max_duration_sec)
+        final_submit_time = (st + datetime.timedelta(seconds=max_duration_sec)).replace(tzinfo=None)
     else:
         duration_sec = raw_duration
-        final_submit_time = now
+        final_submit_time = now_utc.replace(tzinfo=None)
 
     total_q = len(q_ids)
     scoring = calculate_exam_score(audit_details, q_dict, exam)
@@ -2259,12 +2598,20 @@ def submit_exam(payload: AnswerPayload, db: Session = Depends(get_db), current_u
 
 @app.get("/api/exam/review")
 def review_my_exam(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    """Allow candidate to review their own submitted exam if allowed by exam config."""
-    # Find user's latest submitted exam result
-    res = db.query(ExamResult).filter(
-        ExamResult.user_id == current_user.id,
-        ExamResult.status == "submitted"
-    ).order_by(desc(ExamResult.submit_time)).first()
+    # Find user's latest submitted exam result, prioritizing the active exam
+    active_exam = db.query(Exam).filter(Exam.is_active == True, Exam.is_archived == False).first()
+    res = None
+    if active_exam:
+        res = db.query(ExamResult).filter(
+            ExamResult.user_id == current_user.id,
+            ExamResult.exam_id == active_exam.id,
+            ExamResult.status == "submitted"
+        ).order_by(desc(ExamResult.id)).first()
+    if not res:
+        res = db.query(ExamResult).filter(
+            ExamResult.user_id == current_user.id,
+            ExamResult.status == "submitted"
+        ).order_by(desc(ExamResult.id)).first()
     
     if not res:
         raise HTTPException(status_code=404, detail="Bạn chưa nộp bài thi")
@@ -2288,13 +2635,14 @@ def review_my_exam(db: Session = Depends(get_db), current_user: User = Depends(g
         except:
             audit_questions = []
             
+    q_ids = json.loads(res.questions) if res.questions else [item.get("id") for item in audit_questions if item.get("id")]
+    questions = db.query(Question).filter(Question.id.in_(q_ids)).all() if q_ids else []
+    q_dict = {q.id: q for q in questions}
+
     # Fallback reconstruction if answers_detail was missing
     if not audit_questions and res.questions:
         try:
-            q_ids = json.loads(res.questions)
             raw_answers = json.loads(res.answers) if res.answers else {}
-            questions = db.query(Question).filter(Question.id.in_(q_ids)).all()
-            q_dict = {q.id: q for q in questions}
             for idx, qid in enumerate(q_ids):
                 q = q_dict.get(qid)
                 if not q:
@@ -2321,6 +2669,30 @@ def review_my_exam(db: Session = Depends(get_db), current_user: User = Depends(g
                 })
         except Exception as ex:
             print(f"Error rebuilding student review audit detail: {ex}")
+    else:
+        for item in audit_questions:
+            q_obj = q_dict.get(item.get("id"))
+            if q_obj:
+                if not item.get("content"):
+                    item["content"] = q_obj.content
+                if not item.get("option_a"):
+                    item["option_a"] = q_obj.option_a
+                if not item.get("option_b"):
+                    item["option_b"] = q_obj.option_b
+                if not item.get("option_c"):
+                    item["option_c"] = q_obj.option_c
+                if not item.get("option_d"):
+                    item["option_d"] = q_obj.option_d
+                if not item.get("option_e"):
+                    item["option_e"] = getattr(q_obj, 'option_e', '') or ''
+                if not item.get("option_f"):
+                    item["option_f"] = getattr(q_obj, 'option_f', '') or ''
+                if not item.get("question_type"):
+                    item["question_type"] = q_obj.question_type or 'multiple_choice'
+                if not item.get("correct"):
+                    item["correct"] = q_obj.correct_option
+                if not item.get("explanation") and getattr(q_obj, 'explanation', None):
+                    item["explanation"] = q_obj.explanation
             
     safe_audit_questions = []
     for item in audit_questions:
@@ -2427,24 +2799,6 @@ def admin_config_endpoint(
 
 # ==========================================
 # BACKGROUND WORKER FOR EXAM EXPIRATION
-# ==========================================
-@app.on_event("startup")
-async def start_background_session_scanner():
-    async def session_scanner():
-        # Delay slightly on startup to let DB initialize
-        await asyncio.sleep(2)
-        while True:
-            try:
-                db = SessionLocal()
-                try:
-                    sync_expired_sessions(db)
-                finally:
-                    db.close()
-            except Exception:
-                pass
-            await asyncio.sleep(20)
-            
-    asyncio.create_task(session_scanner())
 
 # ==========================================
 # SERVE STATIC ASSETS & ROOT

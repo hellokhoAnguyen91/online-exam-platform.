@@ -10,9 +10,10 @@ __pycache__/
 *$py.class
 *.so
 
-# SQLite WAL temp files
-sql_app.db-shm
-sql_app.db-wal
+# SQLite database & WAL temp files
+*.db
+*.db-shm
+*.db-wal
 
 # OS generated
 .DS_Store

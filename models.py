@@ -33,14 +33,14 @@ class Exam(Base):
     allow_review = Column(Boolean, default=True) # Sinh viên được xem lại đáp án sau khi nộp
     shuffle_questions = Column(Boolean, default=True)
     shuffle_options = Column(Boolean, default=False)
-    mc_max_score = Column(Float, default=50.0) # Điểm tối đa phần trắc nghiệm / lý thuyết
-    essay_max_score = Column(Float, default=30.0) # Điểm tối đa phần tự luận
+    mc_max_score = Column(Float, default=7.0) # Điểm tối đa phần trắc nghiệm / lý thuyết
+    essay_max_score = Column(Float, default=3.0) # Điểm tối đa phần tự luận
     created_at = Column(DateTime, default=datetime.datetime.now)
 
     @property
     def total_max_score(self):
-        mc = self.mc_max_score if self.mc_max_score is not None else 50.0
-        essay = self.essay_max_score if self.essay_max_score is not None else 30.0
+        mc = self.mc_max_score if self.mc_max_score is not None else 7.0
+        essay = self.essay_max_score if self.essay_max_score is not None else 3.0
         return round(mc + essay, 2)
 
 class Question(Base):
@@ -92,15 +92,21 @@ class ExamResult(Base):
     status = Column(String, default="in_progress") # "in_progress", "submitted", "timed_out"
 
 
+import os
+import re
+import base64
+import hashlib
+from sqlalchemy import inspect
+
 def migrate_database():
-    """Ensure all tables and columns exist safely without data loss."""
+    """Ensure all tables and columns exist safely without data loss, and maintain lean database size."""
     # 1. Create any missing tables
     Base.metadata.create_all(bind=engine)
     
+    inspector = inspect(engine)
     with engine.connect() as conn:
         # Check questions columns
-        res = conn.execute(text("PRAGMA table_info(questions);")).fetchall()
-        q_cols = [r[1] for r in res]
+        q_cols = [c["name"] for c in inspector.get_columns("questions")]
         if "exam_id" not in q_cols:
             conn.execute(text("ALTER TABLE questions ADD COLUMN exam_id INTEGER;"))
         if "explanation" not in q_cols:
@@ -113,8 +119,7 @@ def migrate_database():
             conn.execute(text("ALTER TABLE questions ADD COLUMN created_at DATETIME;"))
             
         # Check exam_results columns
-        res = conn.execute(text("PRAGMA table_info(exam_results);")).fetchall()
-        er_cols = [r[1] for r in res]
+        er_cols = [c["name"] for c in inspector.get_columns("exam_results")]
         if "exam_id" not in er_cols:
             conn.execute(text("ALTER TABLE exam_results ADD COLUMN exam_id INTEGER;"))
         if "max_score" not in er_cols:
@@ -135,16 +140,14 @@ def migrate_database():
             conn.execute(text("ALTER TABLE exam_results ADD COLUMN status TEXT DEFAULT 'submitted';"))
             
         # Check users columns
-        res_u = conn.execute(text("PRAGMA table_info(users);")).fetchall()
-        user_cols = [r[1] for r in res_u]
+        user_cols = [c["name"] for c in inspector.get_columns("users")]
         if "dob" not in user_cols:
             conn.execute(text("ALTER TABLE users ADD COLUMN dob VARCHAR;"))
         if "class_name" not in user_cols:
             conn.execute(text("ALTER TABLE users ADD COLUMN class_name VARCHAR;"))
 
         # Check exams columns
-        res_e = conn.execute(text("PRAGMA table_info(exams);")).fetchall()
-        exam_cols = [r[1] for r in res_e]
+        exam_cols = [c["name"] for c in inspector.get_columns("exams")]
         if "mc_max_score" not in exam_cols:
             conn.execute(text("ALTER TABLE exams ADD COLUMN mc_max_score REAL DEFAULT 7.0;"))
         if "essay_max_score" not in exam_cols:
@@ -163,6 +166,77 @@ def migrate_database():
             print(f"[migrate_database] Note on uq_exam_results_user_exam: {e}")
 
         conn.commit()
+
+        # Database Hygiene: Extract Base64 from questions to static files & compact answers_detail
+        upload_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "uploads", "questions")
+        os.makedirs(upload_dir, exist_ok=True)
+        def _save_b64(m):
+            try:
+                uri = m.group(1)
+                header, b64_str = uri.split(",", 1)
+                mime = header.split(";")[0].replace("data:", "") if ";" in header else "image/png"
+                ext = "png"
+                if "jpeg" in mime or "jpg" in mime: ext = "jpg"
+                elif "webp" in mime: ext = "webp"
+                elif "gif" in mime: ext = "gif"
+                elif "svg" in mime: ext = "svg"
+                blob = base64.b64decode(b64_str)
+                h = hashlib.sha256(blob).hexdigest()[:16]
+                fname = f"qimg_{h}.{ext}"
+                fpath = os.path.join(upload_dir, fname)
+                if not os.path.exists(fpath):
+                    with open(fpath, "wb") as f:
+                        f.write(blob)
+                return f'<img src="/static/uploads/questions/{fname}" data:image="true" loading="lazy" class="exam-question-img" alt="Hình ảnh minh họa" style="max-width: 100%; height: auto; max-height: 450px; border-radius: 8px; border: 1px solid #cbd5e1; box-shadow: 0 2px 6px rgba(0,0,0,0.06); display: inline-block;" />'
+            except Exception:
+                return m.group(0)
+
+        try:
+            raw_qs = conn.execute(text("SELECT id, content, option_a, option_b, option_c, option_d, option_e, option_f, explanation FROM questions WHERE content LIKE '%data:image/%' OR option_a LIKE '%data:image/%' OR option_b LIKE '%data:image/%';")).fetchall()
+            for rq in raw_qs:
+                qid, c_val, a_val, b_val, opt_c, opt_d, opt_e, opt_f, exp_val = rq
+                new_vals = [c_val, a_val, b_val, opt_c, opt_d, opt_e, opt_f, exp_val]
+                chg = False
+                for idx, v in enumerate(new_vals):
+                    if v and "data:image" in v and "base64," in v:
+                        nv = re.sub(r'<img[^>]+src=[\'"](data:image/[^\'"]+)[\'"][^>]*>', _save_b64, v)
+                        if nv != v:
+                            new_vals[idx] = nv
+                            chg = True
+                if chg:
+                    conn.execute(text("""
+                        UPDATE questions 
+                        SET content = :c, option_a = :a, option_b = :b, option_c = :opt_c,
+                            option_d = :opt_d, option_e = :opt_e, option_f = :opt_f, explanation = :exp
+                        WHERE id = :qid
+                    """), {
+                        "c": new_vals[0], "a": new_vals[1], "b": new_vals[2], "opt_c": new_vals[3],
+                        "opt_d": new_vals[4], "opt_e": new_vals[5], "opt_f": new_vals[6], "exp": new_vals[7],
+                        "qid": qid
+                    })
+
+            # Compact any answers_detail containing redundant question text
+            raw_ers = conn.execute(text("SELECT id, answers_detail FROM exam_results WHERE answers_detail LIKE '%\"content\"%' LIMIT 500;")).fetchall()
+            for er_id, ans_det in raw_ers:
+                try:
+                    det_list = json.loads(ans_det)
+                    if isinstance(det_list, list):
+                        mod = False
+                        for it in det_list:
+                            for k in ["content", "option_a", "option_b", "option_c", "option_d", "option_e", "option_f", "explanation"]:
+                                if k in it:
+                                    del it[k]
+                                    mod = True
+                        if mod:
+                            conn.execute(text("UPDATE exam_results SET answers_detail = :ad WHERE id = :id"), {
+                                "ad": json.dumps(det_list, ensure_ascii=False),
+                                "id": er_id
+                            })
+                except Exception:
+                    pass
+            conn.commit()
+        except Exception as ex:
+            print(f"[migrate_database] Note on hygiene scan: {ex}")
 
         # Check if any Exam exists, if not create default
         exams = conn.execute(text("SELECT id, title FROM exams;")).fetchall()

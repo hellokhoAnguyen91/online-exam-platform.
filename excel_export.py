@@ -440,6 +440,41 @@ def generate_candidate_audit_excel(res: Any, exam: Any, student: Any, db: Any) -
         except Exception as e:
             print(f"Error rebuilding audit for excel: {e}")
 
+    if audit_questions and db:
+        try:
+            from models import Question
+            missing_content = any(not item.get("content") for item in audit_questions)
+            if missing_content:
+                q_ids = [item.get("id") for item in audit_questions if item.get("id")]
+                if q_ids:
+                    questions = db.query(Question).filter(Question.id.in_(q_ids)).all()
+                    q_dict = {q.id: q for q in questions}
+                    for item in audit_questions:
+                        q_obj = q_dict.get(item.get("id"))
+                        if q_obj:
+                            if not item.get("content"):
+                                item["content"] = q_obj.content
+                            if not item.get("option_a"):
+                                item["option_a"] = q_obj.option_a
+                            if not item.get("option_b"):
+                                item["option_b"] = q_obj.option_b
+                            if not item.get("option_c"):
+                                item["option_c"] = q_obj.option_c
+                            if not item.get("option_d"):
+                                item["option_d"] = q_obj.option_d
+                            if not item.get("option_e"):
+                                item["option_e"] = getattr(q_obj, 'option_e', '') or ''
+                            if not item.get("option_f"):
+                                item["option_f"] = getattr(q_obj, 'option_f', '') or ''
+                            if not item.get("question_type"):
+                                item["question_type"] = q_obj.question_type or 'multiple_choice'
+                            if not item.get("correct"):
+                                item["correct"] = q_obj.correct_option
+                            if not item.get("explanation") and getattr(q_obj, 'explanation', None):
+                                item["explanation"] = q_obj.explanation
+        except Exception as ex:
+            print(f"Error hydrating questions for excel: {ex}")
+
     dur_sec = getattr(res, 'duration_seconds', 0) or 0
     dur_str = f"{dur_sec // 60}p {dur_sec % 60:02d}s" if dur_sec > 0 else "-"
     start_str = res.start_time.strftime("%d/%m/%Y %H:%M:%S") if getattr(res, 'start_time', None) else "-"

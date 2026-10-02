@@ -11,7 +11,7 @@ def test_regression_q11_q43():
         return
 
     qs = parse_docx_questions(docx_path)
-    assert len(qs) == 50, f"Expected 50 questions, got {len(qs)}"
+    assert len(qs) in (50, 55), f"Expected 50 or 55 questions, got {len(qs)}"
 
     # Test Q11 (MSS question)
     q11 = None

@@ -23,6 +23,8 @@ Features:
 - Zero image loss: images embedded as base64 data URIs.
 """
 
+import os
+import hashlib
 import base64
 import html
 import io
@@ -48,43 +50,61 @@ for prefix, uri in [
         nsmap[prefix] = uri
 
 
+UPLOAD_QUESTIONS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "uploads", "questions")
+
+
+def save_image_blob_to_file(blob: bytes, content_type: Optional[str] = None) -> str:
+    """Save an image binary blob to static directory with SHA256 deduplication."""
+    os.makedirs(UPLOAD_QUESTIONS_DIR, exist_ok=True)
+    if not content_type or content_type == 'application/octet-stream':
+        if blob.startswith(b'\x89PNG\r\n\x1a\n'):
+            ext = 'png'
+        elif blob.startswith(b'\xff\xd8\xff'):
+            ext = 'jpg'
+        elif blob.startswith(b'GIF87a') or blob.startswith(b'GIF89a'):
+            ext = 'gif'
+        elif blob.startswith(b'RIFF') and blob[8:12] == b'WEBP':
+            ext = 'webp'
+        elif blob.startswith(b'BM'):
+            ext = 'bmp'
+        elif blob.startswith(b'<svg') or b'<svg' in blob[:100]:
+            ext = 'svg'
+        else:
+            ext = 'png'
+    else:
+        ext = content_type.split('/')[-1].replace('jpeg', 'jpg').replace('svg+xml', 'svg')
+        if not ext or len(ext) > 4:
+            ext = 'png'
+
+    h = hashlib.sha256(blob).hexdigest()[:16]
+    fname = f"qimg_{h}.{ext}"
+    fpath = os.path.join(UPLOAD_QUESTIONS_DIR, fname)
+    if not os.path.exists(fpath):
+        with open(fpath, "wb") as f:
+            f.write(blob)
+    return f"/static/uploads/questions/{fname}"
+
+
 def get_image_data_uri(image_part) -> Optional[str]:
-    """Convert a docx ImagePart to a base64 data URI string."""
+    """Save docx ImagePart to static directory and return static URL."""
     try:
         blob = image_part.blob
         content_type = getattr(image_part, 'content_type', None)
-        
-        # Detect content type from bytes if missing or generic
-        if not content_type or content_type == 'application/octet-stream':
-            if blob.startswith(b'\x89PNG\r\n\x1a\n'):
-                content_type = 'image/png'
-            elif blob.startswith(b'\xff\xd8\xff'):
-                content_type = 'image/jpeg'
-            elif blob.startswith(b'GIF87a') or blob.startswith(b'GIF89a'):
-                content_type = 'image/gif'
-            elif blob.startswith(b'RIFF') and blob[8:12] == b'WEBP':
-                content_type = 'image/webp'
-            elif blob.startswith(b'BM'):
-                content_type = 'image/bmp'
-            elif blob.startswith(b'<svg') or blob.startswith(b'<?xml') or b'<svg' in blob[:100]:
-                content_type = 'image/svg+xml'
-            else:
-                content_type = 'image/png'
-                
-        b64 = base64.b64encode(blob).decode('ascii')
-        return f"data:{content_type};base64,{b64}"
+        return save_image_blob_to_file(blob, content_type)
     except Exception as e:
-        print(f"Error encoding image: {e}")
+        print(f"Error saving image: {e}")
         return None
 
 
 def format_img_tags(img_uris: List[str]) -> str:
-    """Format image URIs as clean HTML img tags with responsive styling."""
+    """Format image URIs as clean HTML img tags with responsive styling, lazy loading, and compatibility marker."""
     html_out = ""
     for uri in img_uris:
+        if not uri:
+            continue
         html_out += (
             f'<div class="exam-img-container" style="margin: 10px 0; text-align: center;">'
-            f'<img src="{uri}" class="exam-question-img" alt="Hình ảnh minh họa" '
+            f'<img src="{uri}" data:image="true" loading="lazy" class="exam-question-img" alt="Hình ảnh minh họa" '
             f'style="max-width: 100%; height: auto; max-height: 450px; border-radius: 8px; '
             f'border: 1px solid #cbd5e1; box-shadow: 0 2px 6px rgba(0,0,0,0.06); display: inline-block;" />'
             f'</div>'

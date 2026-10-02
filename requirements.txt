@@ -14,3 +14,4 @@ reportlab
 pillow
 xlrd>=2.0.1
 lxml
+psycopg2-binary

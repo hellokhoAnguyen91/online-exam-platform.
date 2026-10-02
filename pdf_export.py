@@ -212,6 +212,17 @@ def prepare_rl_text(text: Optional[str]) -> Tuple[str, List[RLImage]]:
             rl_img = get_optimized_rl_image(b64_part)
             if rl_img:
                 images.append(rl_img)
+        elif src.startswith("/static/") or src.startswith("static/"):
+            rel_path = src.lstrip("/")
+            if os.path.exists(rel_path):
+                try:
+                    with open(rel_path, "rb") as f:
+                        b64_part = base64.b64encode(f.read()).decode('ascii')
+                        rl_img = get_optimized_rl_image(b64_part)
+                        if rl_img:
+                            images.append(rl_img)
+                except Exception as ex:
+                    print(f"Error loading static image for PDF: {ex}")
 
     # 2. Strip <img> tags from text
     text = img_pattern.sub("", text)
@@ -838,6 +849,38 @@ def generate_batch_exam_zip(exam: Any, results: List[Any], db: Any) -> Tuple[byt
                         })
                 except Exception as e:
                     print(f"[PDF] Error rebuilding questions for result {res.id}: {e}")
+
+            if audit_questions and db:
+                try:
+                    missing_content = any(not item.get("content") for item in audit_questions)
+                    if missing_content:
+                        q_ids = [item.get("id") for item in audit_questions if item.get("id")]
+                        if q_ids:
+                            questions = db.query(Question).filter(Question.id.in_(q_ids)).all()
+                            q_dict = {q.id: q for q in questions}
+                            for item in audit_questions:
+                                q_obj = q_dict.get(item.get("id"))
+                                if q_obj:
+                                    if not item.get("content"):
+                                        item["content"] = q_obj.content
+                                    if not item.get("option_a"):
+                                        item["option_a"] = clean_exam_option(q_obj.option_a)
+                                    if not item.get("option_b"):
+                                        item["option_b"] = clean_exam_option(q_obj.option_b)
+                                    if not item.get("option_c"):
+                                        item["option_c"] = clean_exam_option(q_obj.option_c)
+                                    if not item.get("option_d"):
+                                        item["option_d"] = clean_exam_option(q_obj.option_d)
+                                    if not item.get("option_e"):
+                                        item["option_e"] = clean_exam_option(getattr(q_obj, 'option_e', '') or '')
+                                    if not item.get("option_f"):
+                                        item["option_f"] = clean_exam_option(getattr(q_obj, 'option_f', '') or '')
+                                    if not item.get("question_type"):
+                                        item["question_type"] = getattr(q_obj, 'question_type', 'multiple_choice')
+                                    if not item.get("correct"):
+                                        item["correct"] = q_obj.correct_option
+                except Exception as ex:
+                    print(f"[PDF] Error hydrating questions for result {res.id}: {ex}")
 
             # Duration formatting
             dur_sec = res.duration_seconds or 0

@@ -825,17 +825,22 @@
 <!-- ======================================================== -->
 <div class="main-container hidden" id="student-view">
     <!-- Network Error Sticky Notice Banner -->
-    <div id="submit-network-error-banner" class="hidden" style="background:#fef2f2; border:2px solid #ef4444; border-radius:var(--radius); padding:16px 20px; margin-bottom:20px; color:#991b1b; display:flex; justify-content:space-between; align-items:center; box-shadow:0 4px 6px -1px rgba(239,68,68,0.15);">
-        <div style="display:flex; align-items:center; gap:12px;">
+    <div id="submit-network-error-banner" class="hidden" style="background:#fef2f2; border:2px solid #ef4444; border-radius:var(--radius); padding:16px 20px; margin-bottom:20px; color:#991b1b; display:flex; justify-content:space-between; align-items:center; box-shadow:0 4px 6px -1px rgba(239,68,68,0.15); flex-wrap:wrap; gap:12px;">
+        <div style="display:flex; align-items:center; gap:12px; flex:1; min-width:280px;">
             <span style="font-size:1.8rem;">⚠️</span>
             <div>
                 <strong style="font-size:1rem; display:block;">LỖI KẾT NỐI MẠNG KHI NỘP BÀI!</strong>
-                <span style="font-size:0.88rem; color:#b91c1c;">Hệ thống không thể gửi bài thi do mất kết nối mạng. Toàn bộ bài làm của bạn đã được <strong>LƯU AN TOÀN</strong> trong bộ nhớ máy (LocalStorage). Vui lòng kiểm tra Wifi/mạng và bấm <strong>NỘP LẠI BÀI THI</strong>.</span>
+                <span style="font-size:0.88rem; color:#b91c1c;">Hệ thống không thể gửi bài thi do mất kết nối mạng. Toàn bộ bài làm của bạn đã được <strong>LƯU AN TOÀN</strong> trong bộ nhớ máy (LocalStorage). Vui lòng kiểm tra Wifi/mạng và bấm <strong>NỘP LẠI BÀI THI</strong>, hoặc sao chép mã cứu hộ gửi cho giảng viên.</span>
             </div>
         </div>
-        <button class="btn btn-danger btn-lg" onclick="executeSubmitExam(false)" style="white-space:nowrap; margin-left:16px; font-weight:700;">
-            🔄 Nộp lại bài thi
-        </button>
+        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <button type="button" class="btn btn-secondary" onclick="copyRescueCode()" style="white-space:nowrap; font-weight:700; background:#f8fafc; border:1px solid #cbd5e1; color:#0f172a;">
+                📋 Sao chép mã cứu hộ bài làm
+            </button>
+            <button class="btn btn-danger btn-lg" onclick="executeSubmitExam(false)" style="white-space:nowrap; font-weight:700;">
+                🔄 Nộp lại bài thi
+            </button>
+        </div>
     </div>
 
     <!-- Notice Box (Shown when exam is upcoming, closed, or error) -->
@@ -889,11 +894,14 @@
         </div>
 
         <!-- Progress Bar -->
-        <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.88rem; font-weight:600; color:#475569;">
+        <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.88rem; font-weight:600; color:#475569; flex-wrap:wrap; gap:8px;">
             <span>Tiến độ hoàn thành: <strong id="progress-text" style="color:var(--primary);">0/0 câu</strong></span>
-            <span id="autosave-indicator" style="color:#059669; display:flex; align-items:center; gap:5px;">
-                <span style="width:8px; height:8px; background:#10b981; border-radius:50%;"></span> Đã lưu tự động
-            </span>
+            <div style="display:flex; align-items:center; gap:12px;">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="copyRescueCode()" style="padding:4px 10px; font-size:0.82rem; background:#f1f5f9; border:1px solid #cbd5e1; color:#334155;" title="Sao chép mã cứu hộ để dự phòng mất mạng hoặc cần hỗ trợ">📋 Sao chép mã cứu hộ bài làm</button>
+                <span id="autosave-indicator" style="color:#059669; display:flex; align-items:center; gap:5px;">
+                    <span style="width:8px; height:8px; background:#10b981; border-radius:50%;"></span> Đã lưu tự động
+                </span>
+            </div>
         </div>
         <div class="progress-bar-wrap">
             <div class="progress-bar-fill" id="progress-bar"></div>
@@ -975,9 +983,12 @@
             <div style="font-size:0.95rem; color:#475569;" id="res-subtext">Số câu đúng: -- / --</div>
         </div>
 
-        <div style="display:flex; justify-content:center; gap:12px;">
+        <div style="display:flex; justify-content:center; gap:12px; flex-wrap:wrap;">
             <button id="btn-self-review" class="btn btn-primary" onclick="openSelfReview()" style="display:none;">
                 🔍 Xem lại bài làm chi tiết
+            </button>
+            <button type="button" class="btn btn-secondary" onclick="copyRescueCode()" style="background:#f1f5f9; border:1px solid #cbd5e1; color:#334155;">
+                📋 Sao chép mã cứu hộ bài làm
             </button>
             <button class="btn btn-secondary" onclick="logout()">Đăng xuất</button>
         </div>
@@ -1351,6 +1362,7 @@
                     <button class="btn btn-secondary btn-sm" onclick="window.print()">🖨️ In bảng điểm</button>
                     <button class="btn btn-success btn-sm" onclick="exportResultsExcel()">📥 Xuất bảng điểm Excel (.ZIP)</button>
                     <button class="btn btn-primary btn-sm" id="btn-export-pdf-zip" onclick="exportAllPdfsZip()" style="background:#4338ca; border-color:#4338ca;">📦 Tải tất cả bài thi PDF (.ZIP)</button>
+                    <button class="btn btn-warning btn-sm" onclick="openRescueImportModal()" style="background:#d97706; border-color:#d97706; color:white;">📥 Phục hồi từ mã cứu hộ</button>
                 </div>
             </div>
 
@@ -1516,6 +1528,29 @@
         <button class="btn btn-primary btn-lg" style="width:100%;" onclick="handleRestoreExam()">
             🚀 Bắt đầu khôi phục kỳ thi
         </button>
+    </div>
+</div>
+
+<!-- RESCUE IMPORT MODAL -->
+<div class="modal-overlay hidden" id="rescue-import-modal">
+    <div class="modal-box" style="max-width:560px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+            <h3 style="font-size:1.2rem; font-weight:700; color:#1e293b; display:flex; align-items:center; gap:8px;">
+                📥 Phục Hồi Bài Thi Từ Mã Cứu Hộ
+            </h3>
+            <button class="btn btn-secondary btn-sm" onclick="closeModal('rescue-import-modal')">✕</button>
+        </div>
+        <p style="color:#64748b; font-size:0.9rem; margin-bottom:14px; line-height:1.5;">
+            Dán chuỗi <strong>Mã cứu hộ bài làm</strong> do thí sinh cung cấp (khi gặp sự cố sập mạng, 502 hoặc mất bài) để hệ thống tự động giải mã và phục hồi trọn vẹn điểm số & bài làm.
+        </p>
+        <div class="input-group">
+            <label style="font-weight:600;">Chuỗi mã cứu hộ (Bắt đầu bằng HCMUTE-RESCUE: hoặc JSON Base64):</label>
+            <textarea id="rescue-code-input" class="input-control" rows="6" placeholder="Dán mã cứu hộ tại đây..." style="font-family:monospace; font-size:0.85rem; word-break:break-all;" required></textarea>
+        </div>
+        <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:16px;">
+            <button class="btn btn-secondary" onclick="closeModal('rescue-import-modal')">Hủy</button>
+            <button class="btn btn-primary" id="btn-submit-rescue-import" onclick="handleRescueImport()" style="background:#d97706; border-color:#d97706;">⚡ Phục hồi ngay</button>
+        </div>
     </div>
 </div>
 
@@ -1971,16 +2006,36 @@
     // CANDIDATE / STUDENT EXAM FLOW
     // ========================================================
     let currentStudentExamId = null;
+    let clockSkew = 0; // serverNow - clientNow
+    let hasUnsavedChanges = false;
+    let isSavingInProgress = false;
+
     function getExamCacheKey() {
         const userKey = (currentUser && currentUser.username) ? currentUser.username : 'student';
         const exKey = currentStudentExamId ? `_${currentStudentExamId}` : '';
         return `exam_cache_${userKey}${exKey}`;
     }
 
+    function getExamBackupKey() {
+        const userKey = (currentUser && currentUser.username) ? currentUser.username : 'student';
+        const exKey = currentStudentExamId ? `_${currentStudentExamId}` : 'active';
+        return `exam_backup_${exKey}_${userKey}`;
+    }
+
     function saveExamCache() {
         try {
             if (studentAnswers && Object.keys(studentAnswers).length > 0) {
                 localStorage.setItem(getExamCacheKey(), JSON.stringify(studentAnswers));
+                // Always maintain black box backup
+                const backupPayload = {
+                    saved_at: Date.now(),
+                    exam_id: currentStudentExamId,
+                    user_id: currentUser ? currentUser.id : null,
+                    username: currentUser ? currentUser.username : null,
+                    fullname: currentUser ? currentUser.fullname : null,
+                    answers: studentAnswers
+                };
+                localStorage.setItem(getExamBackupKey(), JSON.stringify(backupPayload));
             }
         } catch(e) {
             console.warn("Could not save to LocalStorage:", e);
@@ -1999,9 +2054,97 @@
 
     function clearExamCache() {
         try {
+            // Backup with 7-day retention instead of losing data
+            if (studentAnswers && Object.keys(studentAnswers).length > 0) {
+                const backupPayload = {
+                    saved_at: Date.now(),
+                    exam_id: currentStudentExamId,
+                    user_id: currentUser ? currentUser.id : null,
+                    username: currentUser ? currentUser.username : null,
+                    fullname: currentUser ? currentUser.fullname : null,
+                    answers: studentAnswers
+                };
+                localStorage.setItem(getExamBackupKey(), JSON.stringify(backupPayload));
+            }
             localStorage.removeItem(getExamCacheKey());
+            cleanupOldBackups();
         } catch(e) {
-            console.warn("Could not clear LocalStorage:", e);
+            console.warn("Could not clear/backup LocalStorage:", e);
+        }
+    }
+
+    function cleanupOldBackups() {
+        try {
+            const now = Date.now();
+            const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith('exam_backup_')) {
+                    const val = localStorage.getItem(key);
+                    if (val) {
+                        try {
+                            const data = JSON.parse(val);
+                            if (data.saved_at && (now - data.saved_at > sevenDaysMs)) {
+                                localStorage.removeItem(key);
+                            }
+                        } catch(err) {}
+                    }
+                }
+            }
+        } catch(e) {}
+    }
+
+    function generateRescueCode() {
+        try {
+            let answersToExport = studentAnswers;
+            if (!answersToExport || Object.keys(answersToExport).length === 0) {
+                answersToExport = loadExamCache() || {};
+            }
+            if ((!answersToExport || Object.keys(answersToExport).length === 0)) {
+                const bRaw = localStorage.getItem(getExamBackupKey());
+                if (bRaw) {
+                    const parsed = JSON.parse(bRaw);
+                    answersToExport = parsed.answers || {};
+                }
+            }
+            const payload = {
+                v: 1,
+                exam_id: currentStudentExamId,
+                user_id: currentUser ? currentUser.id : null,
+                username: currentUser ? currentUser.username : null,
+                fullname: currentUser ? currentUser.fullname : null,
+                answers: answersToExport || {},
+                timestamp: new Date().toISOString()
+            };
+            const jsonStr = JSON.stringify(payload);
+            const b64 = btoa(unescape(encodeURIComponent(jsonStr)));
+            return `HCMUTE-RESCUE:${b64}`;
+        } catch(e) {
+            console.error("Error generating rescue code:", e);
+            return "";
+        }
+    }
+
+    async function copyRescueCode() {
+        const code = generateRescueCode();
+        if (!code) {
+            showToast("Chưa có dữ liệu bài làm để tạo mã cứu hộ!", "warning");
+            return;
+        }
+        try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(code);
+            } else {
+                const ta = document.createElement("textarea");
+                ta.value = code;
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand("copy");
+                document.body.removeChild(ta);
+            }
+            showToast("📋 Đã sao chép mã cứu hộ bài làm vào bộ nhớ tạm! Bạn có thể gửi mã này cho giảng viên.", "success");
+        } catch(err) {
+            prompt("Mã cứu hộ bài làm của bạn (sao chép và gửi cho giảng viên):", code);
         }
     }
 
@@ -2036,6 +2179,22 @@
                 clearExamCache();
                 showSubmittedResult(data);
             } else {
+                // Compute clockSkew to anchor timer to server UTC clock
+                const clientNow = Date.now();
+                if (data.server_now_utc) {
+                    const serverNowMs = new Date(data.server_now_utc).getTime();
+                    clockSkew = serverNowMs - clientNow;
+                } else {
+                    clockSkew = 0;
+                }
+
+                if (data.end_time_utc) {
+                    const serverEndMs = new Date(data.end_time_utc).getTime();
+                    examEndTime = serverEndMs - clockSkew;
+                } else {
+                    examEndTime = Date.now() + ((data.time_left || 0) * 1000);
+                }
+
                 examQuestions = data.questions || [];
                 studentAnswers = data.answers || {};
                 const cachedAnswers = loadExamCache();
@@ -2051,7 +2210,8 @@
                     });
                     updateProgress();
                     if (hasRestored) {
-                        triggerAutosave();
+                        hasUnsavedChanges = true;
+                        scheduleServerSave(3000);
                     }
                 }
                 currentExamMeta = data;
@@ -2072,7 +2232,8 @@
                 renderQuestions(examQuestions);
                 renderPalette(examQuestions);
                 updateProgress();
-                startExamTimer(data.time_left);
+                const remainingSec = Math.max(0, Math.floor((examEndTime - Date.now()) / 1000));
+                startExamTimer(remainingSec);
                 document.body.classList.add('exam-ongoing');
                 window.onbeforeunload = function() {
                     return "Bài thi đang diễn ra! Bạn có chắc muốn rời khỏi trang?";
@@ -2142,7 +2303,8 @@
                     </div>
                     <textarea class="input-control" rows="6" placeholder="Nhập câu trả lời tự luận chi tiết của bạn vào đây..." 
                               style="font-family: inherit; font-size: 0.95rem; line-height: 1.6; resize: vertical;"
-                              oninput="handleEssayInput(${q.id}, this.value)">${escapeHtml(ans)}</textarea>
+                              oninput="handleEssayInput(${q.id}, this.value)"
+                              onblur="if(hasUnsavedChanges) triggerAutosave()">${escapeHtml(ans)}</textarea>
                 </div>
             `;
         } else if (q.question_type === 'multi_select') {
@@ -2312,6 +2474,7 @@
             btn.innerText = isEssay ? `TL${essayIdx + 1}` : (idx + 1);
             btn.title = isEssay ? `Câu ${idx + 1} (Tự luận ${essayIdx + 1})` : `Câu ${idx + 1} (Trắc nghiệm)`;
             btn.onclick = () => {
+                if (hasUnsavedChanges) triggerAutosave();
                 const el = document.getElementById(`q-card-${q.id}`);
                 if(el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
             };
@@ -2415,8 +2578,17 @@
     }
 
     let autosaveTimeout = null;
+
+    function scheduleServerSave(delayMs = 25000) {
+        clearTimeout(autosaveTimeout);
+        autosaveTimeout = setTimeout(triggerAutosave, delayMs);
+    }
+
     async function triggerAutosave() {
-        if(examEndTime && Date.now() >= examEndTime) {
+        if (!hasUnsavedChanges) return;
+        if (isSavingInProgress) return;
+
+        if (examEndTime && Date.now() >= examEndTime) {
             lockExamInputs();
             showToast("⏰ Thời gian làm bài đã kết thúc! Hệ thống đang tự động nộp bài...", "warning");
             executeSubmitExam(true);
@@ -2424,25 +2596,57 @@
         }
 
         const ind = document.getElementById('autosave-indicator');
+        isSavingInProgress = true;
+        const currentPayload = JSON.stringify({answers: studentAnswers});
         try {
             const res = await apiReq('/api/exam/save_progress', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({answers: studentAnswers})
+                body: currentPayload
             });
-            if(res.ok) {
+
+            if (res.ok) {
                 const data = await res.json();
-                if(data.status === 'expired') {
+                if (data.status === 'expired') {
                     lockExamInputs();
                     showToast(data.detail || "Đã hết giờ làm bài! Đang nộp bài...", "warning");
                     executeSubmitExam(true);
                     return;
                 }
+                if (data.status === 'saved') {
+                    if (JSON.stringify({answers: studentAnswers}) === currentPayload) {
+                        hasUnsavedChanges = false;
+                    } else {
+                        // More changes occurred while request was in-flight; reschedule
+                        hasUnsavedChanges = true;
+                        scheduleServerSave(3000);
+                    }
+                    // Realtime extension check without requiring F5
+                    if (data.end_time_utc) {
+                        const serverEndMs = new Date(data.end_time_utc).getTime();
+                        examEndTime = serverEndMs - clockSkew;
+                    }
+                    const d = new Date();
+                    const timeStr = `${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}:${d.getSeconds().toString().padStart(2,'0')}`;
+                    if (ind) {
+                        ind.innerHTML = `<span style="width:8px; height:8px; background:#10b981; border-radius:50%;"></span> Đã lưu ${timeStr}`;
+                        ind.style.color = '#059669';
+                    }
+                    return;
+                }
             }
-            const d = new Date();
-            ind.innerHTML = `<span style="width:8px; height:8px; background:#10b981; border-radius:50%;"></span> Đã lưu ${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}:${d.getSeconds().toString().padStart(2,'0')}`;
+            throw new Error(`Server returned status ${res.status}`);
         } catch(e) {
-            ind.innerHTML = `<span style="width:8px; height:8px; background:#ef4444; border-radius:50%;"></span> Lỗi lưu!`;
+            console.warn("Autosave network error, retrying in 5s:", e);
+            if (ind) {
+                ind.innerHTML = `<span style="width:8px; height:8px; background:#f59e0b; border-radius:50%;"></span> ⚠️ Đang lưu trên máy (chờ mạng...)`;
+                ind.style.color = '#d97706';
+            }
+            // Retry in 5s
+            clearTimeout(autosaveTimeout);
+            autosaveTimeout = setTimeout(triggerAutosave, 5000);
+        } finally {
+            isSavingInProgress = false;
         }
     }
 
@@ -2455,10 +2659,14 @@
             else palBtn.classList.remove('answered');
         }
         updateProgress();
-        saveExamCache();
-
-        clearTimeout(autosaveTimeout);
-        autosaveTimeout = setTimeout(triggerAutosave, 1000);
+        saveExamCache(); // 0ms immediate save to LocalStorage & Backup
+        hasUnsavedChanges = true;
+        const ind = document.getElementById('autosave-indicator');
+        if (ind && !ind.innerText.includes('chờ mạng')) {
+            ind.innerHTML = `<span style="width:8px; height:8px; background:#f59e0b; border-radius:50%;"></span> Đang lưu...`;
+            ind.style.color = '#d97706';
+        }
+        scheduleServerSave(25000); // 25s debounce
     }
 
     function handleMultiSelect(qId, val, checked) {
@@ -2486,8 +2694,14 @@
         }
 
         updateProgress();
-        saveExamCache();
-        triggerAutosave();
+        saveExamCache(); // 0ms immediate save to LocalStorage & Backup
+        hasUnsavedChanges = true;
+        const ind = document.getElementById('autosave-indicator');
+        if (ind && !ind.innerText.includes('chờ mạng')) {
+            ind.innerHTML = `<span style="width:8px; height:8px; background:#f59e0b; border-radius:50%;"></span> Đang lưu...`;
+            ind.style.color = '#d97706';
+        }
+        scheduleServerSave(25000); // 25s debounce
     }
 
     async function handleSelectAnswer(qId, val) {
@@ -2507,8 +2721,14 @@
         if(palBtn) palBtn.classList.add('answered');
 
         updateProgress();
-        saveExamCache();
-        triggerAutosave();
+        saveExamCache(); // 0ms immediate save to LocalStorage & Backup
+        hasUnsavedChanges = true;
+        const ind = document.getElementById('autosave-indicator');
+        if (ind && !ind.innerText.includes('chờ mạng')) {
+            ind.innerHTML = `<span style="width:8px; height:8px; background:#f59e0b; border-radius:50%;"></span> Đang lưu...`;
+            ind.style.color = '#d97706';
+        }
+        scheduleServerSave(25000); // 25s debounce
     }
 
     function updateProgress() {
@@ -2581,7 +2801,9 @@
         clearInterval(timerInterval);
         isSubmittingExam = false;
         // Anchor to real wall-clock time so background tab throttling never delays expiration!
-        examEndTime = Date.now() + (secondsLeft * 1000);
+        if (!examEndTime || examEndTime <= Date.now()) {
+            examEndTime = Date.now() + (secondsLeft * 1000);
+        }
         const timerEl = document.getElementById('exam-timer');
         const timerBox = document.getElementById('timer-box');
 
@@ -2649,6 +2871,7 @@
     }
 
     async function executeSubmitExam(isAuto = false) {
+        clearTimeout(autosaveTimeout);
         closeModal('confirm-submit-modal');
         clearInterval(timerInterval);
         lockExamInputs();
@@ -2660,6 +2883,7 @@
             });
             if(res.ok) {
                 const data = await res.json();
+                hasUnsavedChanges = false;
                 clearExamCache();
                 const errBanner = document.getElementById('submit-network-error-banner');
                 if(errBanner) errBanner.classList.add('hidden');
@@ -3845,6 +4069,47 @@
         const clean = term.toLowerCase().trim();
         const filtered = loadedResults.filter(r => r.username.toLowerCase().includes(clean) || r.fullname.toLowerCase().includes(clean));
         renderResultsTable(filtered);
+    }
+
+    function openRescueImportModal() {
+        const input = document.getElementById('rescue-code-input');
+        if (input) input.value = '';
+        openModal('rescue-import-modal');
+    }
+
+    async function handleRescueImport() {
+        const input = document.getElementById('rescue-code-input');
+        const btn = document.getElementById('btn-submit-rescue-import');
+        const code = input ? input.value.trim() : '';
+        if (!code) {
+            showToast("Vui lòng dán mã cứu hộ bài làm!", "warning");
+            return;
+        }
+        if (btn) {
+            btn.disabled = true;
+            btn.innerText = "⏳ Đang phục hồi...";
+        }
+        try {
+            const res = await apiReq('/api/admin/rescue_import', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ rescue_code: code })
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                throw new Error(data.detail || "Không thể phục hồi bài thi");
+            }
+            closeModal('rescue-import-modal');
+            showToast(`🎉 ${data.message || 'Phục hồi bài thi thành công!'}`, "success");
+            loadAdminResults();
+        } catch(err) {
+            showToast("Lỗi phục hồi: " + err.message, "danger");
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerText = "⚡ Phục hồi ngay";
+            }
+        }
     }
 
     async function exportResultsExcel() {
